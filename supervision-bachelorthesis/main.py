@@ -1,4 +1,5 @@
 import argparse
+from collections import deque, defaultdict
 
 import cv2
 import numpy as np
@@ -7,8 +8,13 @@ from ultralytics import YOLO
 import supervision as sv
 
 # THIS SHOULD BE CHANGED FOR EVERY VIDEO
-# TODO: Polygon is not drawn correctly, coordinates should be accurate for highway_test.mp4 (check: https://roboflow.github.io/polygonzone/)
-SOURCE = np.array([[1007, 563], [2317, 823], [937, 1023], [467, 583]])
+# Polygon coordinates can be checked on this link: https://roboflow.github.io/polygonzone/
+SOURCE = np.array([
+    [846, 435],
+    [1742, 611],
+    [642, 711],
+    [382, 456]
+])
 # THIS SHOULD BE CHANGED FOR EVERY VIDEO
 TARGET_WIDTH = 25
 # THIS SHOULD BE CHANGED FOR EVERY VIDEO
@@ -25,7 +31,7 @@ TARGET = np.array(
 
 
 class ViewTransformer:
-    def __init__(self, source: np.ndarray, target: np.ndarray):
+    def __init__(self, source: np.ndarray, target: np.ndarray) -> None:
         source = source.astype(np.float32)
         target = target.astype(np.float32)
         self.m = cv2.getPerspectiveTransform(source, target)
@@ -70,6 +76,8 @@ if __name__ == "__main__":
     polygon_zone = sv.PolygonZone(SOURCE)
     view_transformer = ViewTransformer(source=SOURCE, target=TARGET)
 
+    coordinates = defaultdict(lambda: deque(maxlen=video_info.fps))
+
     for frame in frame_generator:
         result = model(frame)[0]
         detections = sv.Detections.from_ultralytics(result)
@@ -79,14 +87,19 @@ if __name__ == "__main__":
         points = detections.get_anchors_coordinates(anchor=sv.Position.BOTTOM_CENTER)
         points = view_transformer.transform_points(points=points).astype(int)
 
-        labels = [
-            f"x: {x}, y: {y}"
-            for [x, y] in points
+        labels = []
+        for tracker_id, [_,y] in zip(detections.tracker_id, points):
+            coordinates[tracker_id].append(y)
+            if len(coordinates[tracker_id]) < video_info.fps / 2:
+                labels.append(f"#{tracker_id}")
+            else:
+                coordinate_start = coordinates[tracker_id][-1]
+                coordinate_end = coordinates[tracker_id][0]
+                distance = abs(coordinate_end - coordinate_start)
+                time = len(coordinates[tracker_id]) / video_info.fps
+                speed = distance / time * 3.6
+                labels.append(f"#{tracker_id} {int(speed)} km/h")
 
-            # f"#{tracker_id}"
-            # for tracker_id
-            # in detections.tracker_id
-        ]
 
         annotated_frame = frame.copy()
         annotated_frame = sv.draw_polygon(annotated_frame, polygon=SOURCE, color=sv.Color.RED)
