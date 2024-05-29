@@ -18,7 +18,7 @@ SOURCE = np.array([
 # THIS SHOULD BE CHANGED FOR EVERY VIDEO
 TARGET_WIDTH = 25
 # THIS SHOULD BE CHANGED FOR EVERY VIDEO
-TARGET_HEIGHT = 150
+TARGET_HEIGHT = 200
 
 TARGET = np.array(
     [
@@ -62,7 +62,7 @@ if __name__ == "__main__":
     args = parse_arguments()
 
     video_info = sv.VideoInfo.from_video_path(args.source_video_path)
-    model = YOLO("yolov8n.pt")
+    model = YOLO("yolov9c.pt")
 
     byte_track = sv.ByteTrack(frame_rate=video_info.fps)
 
@@ -88,7 +88,7 @@ if __name__ == "__main__":
         points = view_transformer.transform_points(points=points).astype(int)
 
         labels = []
-        for tracker_id, [_,y] in zip(detections.tracker_id, points):
+        for tracker_id, [_, y] in zip(detections.tracker_id, points):
             coordinates[tracker_id].append(y)
             if len(coordinates[tracker_id]) < video_info.fps / 2:
                 labels.append(f"#{tracker_id}")
@@ -99,7 +99,6 @@ if __name__ == "__main__":
                 time = len(coordinates[tracker_id]) / video_info.fps
                 speed = distance / time * 3.6
                 labels.append(f"#{tracker_id} {int(speed)} km/h")
-
 
         annotated_frame = frame.copy()
         annotated_frame = sv.draw_polygon(annotated_frame, polygon=SOURCE, color=sv.Color.RED)
