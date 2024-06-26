@@ -9,23 +9,29 @@ import supervision as sv
 
 # THIS SHOULD BE CHANGED FOR EVERY VIDEO
 # Polygon coordinates can be checked on this link: https://roboflow.github.io/polygonzone/
+# Corners should follow these rules:
+# A: Left Upper Corner
+# B: Right Upper Corner
+# C: Right Bottom Corner
+# D: Left Bottom Corner
+
 SOURCE = np.array([
-    [846, 435],
-    [1742, 611],
-    [642, 711],
-    [382, 456]
+    [382, 456],  # A
+    [846, 435],  # B
+    [1742, 611],  # C
+    [642, 711]  # D
 ])
 # THIS SHOULD BE CHANGED FOR EVERY VIDEO
 TARGET_WIDTH = 25
 # THIS SHOULD BE CHANGED FOR EVERY VIDEO
-TARGET_HEIGHT = 200
+TARGET_HEIGHT = 100
 
 TARGET = np.array(
     [
-        [0, 0],
-        [TARGET_WIDTH - 1, 0],
-        [TARGET_WIDTH - 1, TARGET_HEIGHT - 1],
-        [0, TARGET_HEIGHT - 1]
+        [0, 0],  # A
+        [TARGET_WIDTH - 1, 0],  # B
+        [TARGET_WIDTH - 1, TARGET_HEIGHT - 1],  # C
+        [0, TARGET_HEIGHT - 1]  # D
     ]
 )
 
@@ -58,11 +64,25 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def calculate_distances(tracked_points):
+    distances = {}
+    keys = list(tracked_points.keys())
+    for i in range(len(keys)):
+        for j in range(i + 1, len(keys)):
+            id1 = keys[i]
+            id2 = keys[j]
+            point1 = np.array(tracked_points[id1][-1])
+            point2 = np.array(tracked_points[id2][-1])
+            delta = np.linalg.norm(point1 - point2)
+            distances[(id1, id2)] = delta
+    return distances
+
+
 if __name__ == "__main__":
     args = parse_arguments()
 
     video_info = sv.VideoInfo.from_video_path(args.source_video_path)
-    model = YOLO("yolov9c.pt")
+    model = YOLO("yolov10m.pt")
 
     byte_track = sv.ByteTrack(frame_rate=video_info.fps)
 
@@ -86,7 +106,7 @@ if __name__ == "__main__":
 
         points = detections.get_anchors_coordinates(anchor=sv.Position.BOTTOM_CENTER)
         points = view_transformer.transform_points(points=points).astype(int)
-
+        print(points)
         labels = []
         for tracker_id, [_, y] in zip(detections.tracker_id, points):
             coordinates[tracker_id].append(y)
