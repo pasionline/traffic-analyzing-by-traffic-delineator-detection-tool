@@ -16,13 +16,13 @@ def callback(image_slice: np.ndarray) -> sv.Detections:
 slicer = sv.InferenceSlicer(callback=callback)
 detections = slicer(image)
 
-i = 0
-while i < 50:
-    image = next(frame_generator)
-    nextDetections = slicer(image)
-    if len(nextDetections.xyxy) > len(detections.xyxy):
-        detections = nextDetections
-    i += 1
+#i = 0
+#while i < 50:
+#    image = next(frame_generator)
+#    nextDetections = slicer(image)
+#    if len(nextDetections.xyxy) > len(detections.xyxy):
+#        detections = nextDetections
+#    i += 1
 
 print(detections.xyxy)
 
