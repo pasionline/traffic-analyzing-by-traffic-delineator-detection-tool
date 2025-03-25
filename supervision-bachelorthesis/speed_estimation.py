@@ -7,7 +7,7 @@ import supervision as sv
 
 if __name__ == "__main__":
 
-    videoPath = "highway_test.mp4"
+    videoPath = "vehicles.mp4"
 
     video_info = sv.VideoInfo.from_video_path(videoPath)
     model = YOLO("yolo11n.pt")
@@ -19,15 +19,15 @@ if __name__ == "__main__":
     text_scale = sv.calculate_optimal_text_scale(resolution_wh=video_info.resolution_wh)
 
     # Lines:
-    START1 = sv.Point(382, 456)
-    END1 = sv.Point(846, 435)
-    START2 = sv.Point(1742, 611)
-    END2 = sv.Point(642, 711)
+    START1 = sv.Point(0, video_info.resolution_wh[1]/3)
+    END1 = sv.Point(video_info.resolution_wh[0], video_info.resolution_wh[1]/3)
+    START2 = sv.Point(0, 2*video_info.resolution_wh[1]/3)
+    END2 = sv.Point(video_info.resolution_wh[0],  2*video_info.resolution_wh[1]/3)
 
     line1 = sv.LineZone(start=START1, end=END1)
     line2 = sv.LineZone(start=START2, end=END2)
 
-    line_zone_annotator = sv.LineZoneAnnotator(text_scale=2, text_thickness=4,display_out_count=False)
+    line_zone_annotator = sv.LineZoneAnnotator(text_scale=2, text_thickness=4)
 
     box_annotator = sv.BoxAnnotator(thickness=thickness)
     label_annotator = sv.LabelAnnotator(text_scale=text_scale, text_thickness=thickness)
@@ -48,6 +48,9 @@ if __name__ == "__main__":
 
         enteredVehicle = trigger1[0]
         leavingVehicle = trigger2[0]
+
+        print(enteredVehicle, leavingVehicle)
+
 
 
 
