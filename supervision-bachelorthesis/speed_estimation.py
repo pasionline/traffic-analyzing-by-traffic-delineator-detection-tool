@@ -139,9 +139,9 @@ if __name__ == "__main__":
         vehicle_data = {}
         for tracker_id, [x, y] in zip(detections.tracker_id, vehicle_target_coords):
 
-            if delta1 > y > 0 and vehicle_data.get(tracker_id) is not None:
+            if delta2 < y < TARGET_HEIGHT and vehicle_data.get(tracker_id) is None:
                 vehicle_data[tracker_id] = VehicleData(tracker_id, 0, frame_counter, 0)
-            if delta2 < y < TARGET_HEIGHT and vehicle_data.get(tracker_id) is not None:
+            if delta1 > y > 0 and vehicle_data.get(tracker_id) is not None:
                 data = vehicle_data[tracker_id]
                 frame_diff = frame_counter - data.start_frames
                 time = frame_diff / video_info.fps
