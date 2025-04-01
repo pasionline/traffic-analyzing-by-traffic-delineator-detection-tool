@@ -3,14 +3,95 @@ import numpy as np
 from ultralytics import YOLO
 import supervision as sv
 
+# Corners follow these rules:
+# A: Left Upper Corner
+# B: Right Upper Corner
+# C: Right Bottom Corner
+# D: Left Bottom Corner
+
+TARGET_WIDTH = 25
+TARGET_HEIGHT = 100
+# Range in which the cars are tracked
+TARGET_DELTA = 5
+
+TARGET = np.array(
+    [
+        [0, 0],  # A
+        [TARGET_WIDTH - 1, 0],  # B
+        [TARGET_WIDTH - 1, TARGET_HEIGHT - 1],  # C
+        [0, TARGET_HEIGHT - 1]  # D
+    ]
+)
+
+
+class ViewTransformer:
+    def __init__(self, source: np.ndarray) -> None:
+        target = np.array(TARGET)
+
+        source = source.astype(np.float32)
+        target = target.astype(np.float32)
+        self.m = cv2.getPerspectiveTransform(source, target)
+
+    def transform_points(self, points: np.ndarray) -> np.ndarray:
+        if points.size == 0:
+            return points
+
+        reshaped_points = points.reshape(-1, 1, 2).astype(np.float32)
+        transformed_points = cv2.perspectiveTransform(reshaped_points, self.m)
+        return transformed_points.reshape(-1, 2)
+
+
+class VehicleData:
+    def __init__(self, tracking_id, speed, start_frames, end_frames) -> None:
+        self.tracking_id = tracking_id
+        self.speed = speed
+        self.start_frames = start_frames
+        self.end_frames = end_frames
+
+
+# Returns point array of detected posts using a yolo model
+def get_coordinates(video_path) -> np.ndarray:
+    model = YOLO(f'best_250210.pt')
+    frame_gen = sv.get_video_frames_generator(video_path)
+
+    def callback(image_slice: np.ndarray) -> sv.Detections:
+        result = model(image_slice)[0]
+        return sv.Detections.from_ultralytics(result)
+
+    image = next(frame_gen)
+
+    slicer = sv.InferenceSlicer(callback=callback)
+    detections = slicer(image)
+
+    # Rotating some frames, if vehicles blocking the view (uncommented bc it has a long runtime)
+    # i = 0
+    # while i < 50:
+    #    image = next(frame_generator)
+    #    nextDetections = slicer(image)
+    #    if len(nextDetections.xyxy) > len(detections.xyxy):
+    #        detections = nextDetections
+    #    i += 1
+
+    # Plotting the detection:
+    # box_annotator = sv.BoxAnnotator()
+    # label_annotator = sv.LabelAnnotator()
+
+    # annotated_image = box_annotator.annotate(
+    #     scene=image, detections=detections)
+    #  annotated_image = label_annotator.annotate(
+    #       scene=annotated_image, detections=detections)
+    #
+    # sv.plot_image(annotated_image)
+
+    return detections.get_anchors_coordinates(anchor=sv.Position.BOTTOM_CENTER)
 
 
 if __name__ == "__main__":
 
-    videoPath = "vehicles.mp4"
+    videoPath = "highway_test.mp4"
 
     video_info = sv.VideoInfo.from_video_path(videoPath)
-    model = YOLO("yolo11n.pt")
+    model = YOLO("yolo11l.pt")
 
     byte_track = sv.ByteTrack(frame_rate=video_info.fps)
 
@@ -18,56 +99,71 @@ if __name__ == "__main__":
     thickness = sv.calculate_optimal_line_thickness(resolution_wh=video_info.resolution_wh)
     text_scale = sv.calculate_optimal_text_scale(resolution_wh=video_info.resolution_wh)
 
-    # Lines:
-    START1 = sv.Point(0, video_info.resolution_wh[1]/3)
-    END1 = sv.Point(video_info.resolution_wh[0], video_info.resolution_wh[1]/3)
-    START2 = sv.Point(0, 2*video_info.resolution_wh[1]/3)
-    END2 = sv.Point(video_info.resolution_wh[0],  2*video_info.resolution_wh[1]/3)
+    # raw_source = get_coordinates("vehicles.mp4")
+    # TODO: transform raw source in something reliable
 
-    line1 = sv.LineZone(start=START1, end=END1)
-    line2 = sv.LineZone(start=START2, end=END2)
+    raw_source = np.array([
+        [382, 456],  # A
+        [846, 435],  # B
+        [1742, 611],  # C
+        [642, 711]  # D
+    ])
 
-    line_zone_annotator = sv.LineZoneAnnotator(text_scale=2, text_thickness=4)
+    source = []
+    view_transformer = ViewTransformer(source=raw_source)
+
+    # calculate speed estimation range
+    delta1 = TARGET_DELTA
+    delta2 = TARGET_HEIGHT - TARGET_DELTA
 
     box_annotator = sv.BoxAnnotator(thickness=thickness)
     label_annotator = sv.LabelAnnotator(text_scale=text_scale, text_thickness=thickness)
 
-
-
     frame_generator = sv.get_video_frames_generator(videoPath)
 
+    frame_counter = 0
     # Process Video:
     for frame in frame_generator:
+
         result = model(frame, verbose=False)[0]
         # Object detection
         detections = sv.Detections.from_ultralytics(result)
         detections = byte_track.update_with_detections(detections=detections)
 
-        trigger1 = line1.trigger(detections)
-        trigger2 = line2.trigger(detections)
+        # Transform Picture coords into coords without perspective disturbance (top-down perspective)
+        vehicle_source_coords = detections.get_anchors_coordinates(anchor=sv.Position.BOTTOM_CENTER)
+        vehicle_target_coords = view_transformer.transform_points(vehicle_source_coords)
 
-        enteredVehicle = trigger1[0]
-        leavingVehicle = trigger2[0]
+        # print(vehicle_target_coords)
 
-        print(enteredVehicle, leavingVehicle)
+        vehicle_data = {}
+        for tracker_id, [x, y] in zip(detections.tracker_id, vehicle_target_coords):
 
-
-
+            if delta1 > y > 0 and vehicle_data.get(tracker_id) is not None:
+                vehicle_data[tracker_id] = VehicleData(tracker_id, 0, frame_counter, 0)
+            if delta2 < y < TARGET_HEIGHT and vehicle_data.get(tracker_id) is not None:
+                data = vehicle_data[tracker_id]
+                frame_diff = frame_counter - data.start_frames
+                time = frame_diff / video_info.fps
+                speed = 50 / time * 3.6
+                print(speed)
+                vehicle_data[tracker_id] = VehicleData(data.tracking_id, speed, data.start_frames, frame_counter)
 
         # Label each vehicle:
         labels = [
-            f"#{tracker_id} {result.names[class_id]} {confidence:0.2f}"
-            for tracker_id, class_id, confidence in zip(detections.tracker_id, detections.class_id, detections.confidence)
+            f"#{tracker_id} {result.names[class_id]} {confidence:0.2f} Speed: {vehicle_data.get(tracker_id,VehicleData(tracker_id, 0, 0, 0,)).speed:.2f} km/h"
+            for tracker_id, class_id, confidence in
+            zip(detections.tracker_id, detections.class_id, detections.confidence)
         ]
+
+        # Annotated Frame
         annotated_frame = frame.copy()
-        annotated_frame = line_zone_annotator.annotate(annotated_frame, line_counter=line1)
-        annotated_frame = line_zone_annotator.annotate(annotated_frame, line_counter=line2)
         annotated_frame = box_annotator.annotate(scene=annotated_frame, detections=detections)
         annotated_frame = label_annotator.annotate(scene=annotated_frame, detections=detections, labels=labels)
 
+        frame_counter += 1
 
-
-        #Plotting:
+        # Plotting:
         cv2.imshow("annotated_frame", annotated_frame)
         if cv2.waitKey(1) == ord("q"):
             break
