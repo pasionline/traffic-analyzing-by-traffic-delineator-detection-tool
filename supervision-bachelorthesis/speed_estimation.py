@@ -14,6 +14,8 @@ TARGET_HEIGHT = 100
 # Range in which the cars are tracked
 TARGET_DELTA = 5
 
+DISTANCE = 100 # difference in meters between two delineators
+
 TARGET = np.array(
     [
         [0, 0],  # A
@@ -42,11 +44,12 @@ class ViewTransformer:
 
 
 class VehicleData:
-    def __init__(self, tracking_id, speed, start_frames, end_frames) -> None:
+    def __init__(self, tracking_id, start_frame=None, end_frame=None, speed=None, first_crossed=None):
         self.tracking_id = tracking_id
+        self.start_frame = start_frame
+        self.end_frame = end_frame
         self.speed = speed
-        self.start_frames = start_frames
-        self.end_frames = end_frames
+        self.first_crossed = first_crossed  # "top" or "bottom"
 
 
 # Returns point array of detected posts using a yolo model
@@ -110,6 +113,7 @@ if __name__ == "__main__":
     ])
 
     source = []
+    polygon_zone = sv.PolygonZone(raw_source)
     view_transformer = ViewTransformer(source=raw_source)
 
     # calculate speed estimation range
@@ -122,12 +126,14 @@ if __name__ == "__main__":
     frame_generator = sv.get_video_frames_generator(videoPath)
 
     frame_counter = 0
+    vehicle_data = {}
     # Process Video:
     for frame in frame_generator:
 
         result = model(frame, verbose=False)[0]
         # Object detection
         detections = sv.Detections.from_ultralytics(result)
+        detections = detections[polygon_zone.trigger(detections)]
         detections = byte_track.update_with_detections(detections=detections)
 
         # Transform Picture coords into coords without perspective disturbance (top-down perspective)
@@ -136,28 +142,46 @@ if __name__ == "__main__":
 
         # print(vehicle_target_coords)
 
-        vehicle_data = {}
         for tracker_id, [x, y] in zip(detections.tracker_id, vehicle_target_coords):
+            data = vehicle_data.get(tracker_id)
 
-            if delta2 < y < TARGET_HEIGHT and vehicle_data.get(tracker_id) is None:
-                vehicle_data[tracker_id] = VehicleData(tracker_id, 0, frame_counter, 0)
-            if delta1 > y > 0 and vehicle_data.get(tracker_id) is not None:
-                data = vehicle_data[tracker_id]
-                frame_diff = frame_counter - data.start_frames
-                time = frame_diff / video_info.fps
-                speed = 50 / time * 3.6
-                print(speed)
-                vehicle_data[tracker_id] = VehicleData(data.tracking_id, speed, data.start_frames, frame_counter)
+            # Case 1: Vehicle crosses bottom threshold (delta2 to TARGET_HEIGHT)
+            if delta2 < y < TARGET_HEIGHT:
+                if data is None:
+                    # First time seeing the vehicle
+                    vehicle_data[tracker_id] = VehicleData(tracker_id, start_frame=frame_counter, first_crossed="bottom")
+                elif data.first_crossed == "top" and data.end_frame is None:
+                    # Already crossed one line before; now completing second crossing
+                    data.end_frame = frame_counter
+                    frame_diff = abs(data.end_frame - data.start_frame)
+                    time = frame_diff / video_info.fps
+                    data.speed = (DISTANCE / time) * 3.6  # 50 meters is the known distance
+                    print(f"[top cross] Vehicle {tracker_id} speed: {data.speed:.2f} km/h")
+
+            # Case 2: Vehicle crosses top threshold (delta1 to 0)
+            elif 0 < y < delta1:
+                if data is None:
+                    # First time seeing the vehicle
+                    vehicle_data[tracker_id] = VehicleData(tracker_id, start_frame=frame_counter, first_crossed="top")
+                elif data.first_crossed == "bottom" and data.end_frame is None:
+                    # Already crossed one line before; now completing second crossing
+                    data.end_frame = frame_counter
+                    frame_diff = abs(data.end_frame - data.start_frame)
+                    time = frame_diff / video_info.fps
+                    data.speed = (DISTANCE / time) * 3.6
+                    print(f"[bottom cross] Vehicle {tracker_id} speed: {data.speed:.2f} km/h")
 
         # Label each vehicle:
-        labels = [
-            f"#{tracker_id} {result.names[class_id]} {confidence:0.2f} Speed: {vehicle_data.get(tracker_id,VehicleData(tracker_id, 0, 0, 0,)).speed:.2f} km/h"
-            for tracker_id, class_id, confidence in
-            zip(detections.tracker_id, detections.class_id, detections.confidence)
-        ]
+        labels = []
+        for tracker_id, class_id, confidence in zip(detections.tracker_id, detections.class_id, detections.confidence):
+            data = vehicle_data.get(tracker_id)
+            speed = f"{data.speed:.2f}" if data and data.speed is not None else "N/A"
+            label = f"#{tracker_id} {result.names[class_id]} {confidence:.2f} Speed: {speed} km/h"
+            labels.append(label)
 
         # Annotated Frame
         annotated_frame = frame.copy()
+        annotated_frame = sv.draw_polygon(annotated_frame, polygon=raw_source, color=sv.Color.RED)
         annotated_frame = box_annotator.annotate(scene=annotated_frame, detections=detections)
         annotated_frame = label_annotator.annotate(scene=annotated_frame, detections=detections, labels=labels)
 
