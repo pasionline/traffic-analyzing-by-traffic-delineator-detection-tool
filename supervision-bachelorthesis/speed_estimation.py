@@ -106,10 +106,10 @@ if __name__ == "__main__":
     # TODO: transform raw source in something reliable
 
     raw_source = np.array([
-        [382, 456],  # A
-        [846, 435],  # B
-        [1742, 611],  # C
-        [642, 711]  # D
+        [382, 456],     # A
+        [846, 435],     # B
+        [1742, 611],    # C
+        [642, 711]      # D
     ])
 
     source = []
@@ -126,6 +126,7 @@ if __name__ == "__main__":
     frame_generator = sv.get_video_frames_generator(videoPath)
 
     frame_counter = 0
+    # Vehicle Data stores all the collected data of each vehicle, accessed through tracker_id
     vehicle_data = {}
     # Process Video:
     for frame in frame_generator:
@@ -145,6 +146,7 @@ if __name__ == "__main__":
         for tracker_id, [x, y] in zip(detections.tracker_id, vehicle_target_coords):
             data = vehicle_data.get(tracker_id)
 
+        # Speed Estimation:
             # Case 1: Vehicle crosses bottom threshold (delta2 to TARGET_HEIGHT)
             if delta2 < y < TARGET_HEIGHT:
                 if data is None:
@@ -171,6 +173,8 @@ if __name__ == "__main__":
                     data.speed = (DISTANCE / time) * 3.6
                     print(f"[bottom cross] Vehicle {tracker_id} speed: {data.speed:.2f} km/h")
 
+
+
         # Label each vehicle:
         labels = []
         for tracker_id, class_id, confidence in zip(detections.tracker_id, detections.class_id, detections.confidence):
@@ -187,9 +191,17 @@ if __name__ == "__main__":
 
         frame_counter += 1
 
-        # Plotting:
+        ## Plotting:
+        # Standard view:
         cv2.imshow("annotated_frame", annotated_frame)
         if cv2.waitKey(1) == ord("q"):
             break
+
+        # Top-down view:
+        scale_factor = 10
+        warped_size = (TARGET_WIDTH, TARGET_HEIGHT)
+        top_down_frame = cv2.warpPerspective(frame, view_transformer.m, warped_size)
+        top_down_scaled = cv2.resize(top_down_frame, (TARGET_WIDTH * scale_factor, TARGET_HEIGHT * scale_factor), interpolation=cv2.INTER_CUBIC)
+        cv2.imshow("Top-down Warped Frame", top_down_scaled)
 
     cv2.destroyAllWindows()
