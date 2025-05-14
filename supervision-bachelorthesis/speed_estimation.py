@@ -127,9 +127,9 @@ def crossing_gate(data, gate, frame_counter):
         data.speed = (DISTANCE / time_start_end) * 3.6
         data.start_to_mid_speed = (HALF_DISTANCE / time_start_mid) * 3.6
         data.mid_to_end_speed = (HALF_DISTANCE / time_mid_end) * 3.6
-        data.acceleration = (data.mid_to_end_speed - data.start_to_mid_speed) / time_start_end
+        data.acceleration = (data.mid_to_end_speed - data.start_to_mid_speed) / time_mid_end
 
-        # Finalize average distances
+        #average distances
         avg_distances = {}
         for other_id in distance_sums.get(tracker_id, {}):
             total = distance_sums[tracker_id][other_id]
