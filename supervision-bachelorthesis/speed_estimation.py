@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 import supervision as sv
+import csv
 
 # Corners follow these rules:
 # A: Left Upper Corner
@@ -9,7 +10,7 @@ import supervision as sv
 # C: Right Bottom Corner
 # D: Left Bottom Corner
 
-TARGET_WIDTH = 25
+TARGET_WIDTH = 30
 TARGET_HEIGHT = 100
 # Range in which the cars are tracked
 TARGET_DELTA = 3
@@ -61,7 +62,7 @@ class VehicleData:
 
 # Returns point array of detected posts using a yolo model
 def get_coordinates(video_path) -> np.ndarray:
-    model = YOLO(f'best_250210.pt')
+    model = YOLO(f'best_YOLOv12_traffic-delinator.pt')
     frame_gen = sv.get_video_frames_generator(video_path)
 
     def callback(image_slice: np.ndarray) -> sv.Detections:
@@ -93,7 +94,7 @@ def get_coordinates(video_path) -> np.ndarray:
     #
     # sv.plot_image(annotated_image)
 
-    return detections.get_anchors_coordinates(anchor=sv.Position.BOTTOM_CENTER)
+    return np.array(detections.get_anchors_coordinates(anchor=sv.Position.BOTTOM_CENTER))
 
 
 def crossing_gate(data, gate, frame_counter):
@@ -117,34 +118,39 @@ def crossing_gate(data, gate, frame_counter):
         # Already crossed one line before; now completing second crossing
         data.end_frame = frame_counter
         frame_diff_start_to_end = abs(data.end_frame - data.start_frame)
-        frame_diff_start_to_mid = abs(data.middle_frame - data.start_frame)
-        frame_diff_mid_to_end = abs(data.end_frame - data.middle_frame)
 
-        time_start_mid = frame_diff_start_to_mid / video_info.fps
-        time_mid_end = frame_diff_mid_to_end / video_info.fps
         time_start_end = frame_diff_start_to_end / video_info.fps
-
         data.speed = (DISTANCE / time_start_end) * 3.6
-        data.start_to_mid_speed = (HALF_DISTANCE / time_start_mid) * 3.6
-        data.mid_to_end_speed = (HALF_DISTANCE / time_mid_end) * 3.6
-        data.acceleration = (data.mid_to_end_speed - data.start_to_mid_speed) / time_mid_end
 
-        #average distances
-        avg_distances = {}
-        for other_id in distance_sums.get(tracker_id, {}):
-            total = distance_sums[tracker_id][other_id]
-            count = distance_counts[tracker_id][other_id]
-            avg = total / count
-            avg_distances[other_id] = round(avg, 2)
+        if data.middle_frame is not None:
+            frame_diff_start_to_mid = abs(data.middle_frame - data.start_frame)
+            frame_diff_mid_to_end = abs(data.end_frame - data.middle_frame)
 
-        data.vertical_average_distances = avg_distances
-        print(
-            f"[{gate}] Vehicle {tracker_id} totalspeed: {data.speed:.2f} km/h midspeed: {data.start_to_mid_speed} endspeed: {data.mid_to_end_speed} acc:{data.acceleration:.2f}")
+            time_start_mid = frame_diff_start_to_mid / video_info.fps
+            time_mid_end = frame_diff_mid_to_end / video_info.fps
+
+            data.start_to_mid_speed = (HALF_DISTANCE / time_start_mid) * 3.6
+            data.mid_to_end_speed = (HALF_DISTANCE / time_mid_end) * 3.6
+            data.acceleration = (data.mid_to_end_speed - data.start_to_mid_speed) / time_mid_end
+
+            # average distances
+            avg_distances = {}
+            for other_id in distance_sums.get(tracker_id, {}):
+                total = distance_sums[tracker_id][other_id]
+                count = distance_counts[tracker_id][other_id]
+                avg = total / count
+                avg_distances[other_id] = round(avg, 2)
+
+            data.vertical_average_distances = avg_distances
+            print(f"[{gate}] Vehicle {tracker_id} totalspeed: {data.speed:.2f} km/h midspeed: {data.start_to_mid_speed} endspeed: {data.mid_to_end_speed} acc:{data.acceleration:.2f}")
+        else:
+            # mid was not tracked:
+            print(f"[{gate}] Vehicle {tracker_id} totalspeed: {data.speed:.2f} km/h")
 
 
 if __name__ == "__main__":
 
-    videoPath = "highway_test.mp4"
+    videoPath = "pixabay_test.mp4"
 
     video_info = sv.VideoInfo.from_video_path(videoPath)
     model = YOLO("yolo11l.pt")
@@ -155,15 +161,15 @@ if __name__ == "__main__":
     thickness = sv.calculate_optimal_line_thickness(resolution_wh=video_info.resolution_wh)
     text_scale = sv.calculate_optimal_text_scale(resolution_wh=video_info.resolution_wh)
 
-    # raw_source = get_coordinates("vehicles.mp4")
+    raw_source = get_coordinates("vehicles.mp4")
     # TODO: transform raw source in something reliable
 
-    raw_source = np.array([
-        [382, 456],  # A
-        [846, 435],  # B
-        [1742, 611],  # C
-        [642, 711]  # D
-    ])
+    #raw_source = np.array([
+    #    [382, 456],  # A
+    #    [846, 435],  # B
+    #    [1742, 611],  # C
+    #    [642, 711]  # D
+    #])
 
     polygon_zone = sv.PolygonZone(raw_source)
     view_transformer = ViewTransformer(source=raw_source)
@@ -263,3 +269,34 @@ if __name__ == "__main__":
         cv2.imshow("Top-down Warped Frame", top_down_scaled)
 
     cv2.destroyAllWindows()
+
+    # CSV Export
+    with open("vehicle_data.csv", mode="w", newline="") as csv_file:
+        fieldnames = [
+            "tracking_id",
+            "start_frame",
+            "middle_frame",
+            "end_frame",
+            "first_crossed",
+            "speed",
+            "start_to_mid_speed",
+            "mid_to_end_speed",
+            "acceleration",
+            "average_vertical_distances"
+        ]
+        writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+        writer.writeheader()
+
+        for data in vehicle_data.values():
+            writer.writerow({
+                "tracking_id": data.tracking_id,
+                "start_frame": data.start_frame,
+                "middle_frame": data.middle_frame,
+                "end_frame": data.end_frame,
+                "first_crossed": data.first_crossed,
+                "speed": round(data.speed, 2) if data.speed else None,
+                "start_to_mid_speed": round(data.start_to_mid_speed, 2) if data.start_to_mid_speed else None,
+                "mid_to_end_speed": round(data.mid_to_end_speed, 2) if data.mid_to_end_speed else None,
+                "acceleration": round(data.acceleration, 2) if data.acceleration else None,
+                "average_vertical_distances": data.vertical_average_distances
+            })
