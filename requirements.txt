@@ -1,0 +1,5 @@
+opencv-python
+numpy
+ultralytics
+supervision
+yt-dlp
