@@ -5,13 +5,7 @@ from ultralytics import YOLO
 import supervision as sv
 import csv
 import argparse
-from typing import Tuple
-
-# Corners follow these rules:
-# A: Left Upper Corner
-# B: Right Upper Corner
-# C: Right Bottom Corner
-# D: Left Bottom Corner
+from typing import List, Tuple
 
 TARGET_WIDTH = 30
 TARGET_HEIGHT = 100
@@ -61,7 +55,7 @@ class VehicleData:
 
 
 # Returns point array of detected posts using a yolo model
-def get_coordinates(video_path) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+def get_coordinates(video_path) -> Tuple[np.ndarray, List[Tuple[np.ndarray, np.ndarray]]]:
     model = YOLO(f'best_YOLOv12_traffic-delinator.pt')
     frame_gen = sv.get_video_frames_generator(video_path)
 
@@ -76,9 +70,9 @@ def get_coordinates(video_path) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
 
     coords = detections.get_anchors_coordinates(anchor=sv.Position.BOTTOM_CENTER)
 
-    if len(coords) < 2:
+    if len(coords) < 4:
         print("Not enough points to cluster.")
-        return coords
+        exit(-1)
 
     # Cluster into two groups
     kmeans = KMeans(n_clusters=2, random_state=0).fit(coords)
@@ -108,8 +102,6 @@ def get_coordinates(video_path) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     draw_line(img_with_lines, m0, b0, (255, 0, 0))  # blue
     draw_line(img_with_lines, m1, b1, (0, 255, 0))  # green
 
-    print(cluster_0, cluster_1)
-
     for (x, y), label in zip(coords, labels):
         cv2.circle(img_with_lines, (int(x), int(y)), 4, (0, 0, 255), -1)
         cv2.putText(img_with_lines, str(label), (int(x) + 5, int(y) - 5),
@@ -119,7 +111,14 @@ def get_coordinates(video_path) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
-    return np.array(coords), cluster_0, cluster_1
+    # sort clusters by y-coord
+    cluster_0 = cluster_0[np.argsort(cluster_0[:, 1])[::-1]]
+    cluster_1 = cluster_1[np.argsort(cluster_1[:, 1])[::-1]]
+    print(cluster_0, cluster_1)
+    # pair them:
+    paired_delineators = list(zip(cluster_0, cluster_1))
+
+    return np.array(coords), paired_delineators
 
 
 def crossing_gate(data, gate, frame_counter, distance):
@@ -168,7 +167,8 @@ def crossing_gate(data, gate, frame_counter, distance):
                 avg_distances[other_id] = round(avg, 2)
 
             data.vertical_average_distances = avg_distances
-            print(f"[{gate}] Vehicle {tracker_id} totalspeed: {data.speed:.2f} km/h midspeed: {data.start_to_mid_speed} endspeed: {data.mid_to_end_speed} acc:{data.acceleration:.2f}")
+            print(
+                f"[{gate}] Vehicle {tracker_id} totalspeed: {data.speed:.2f} km/h midspeed: {data.start_to_mid_speed} endspeed: {data.mid_to_end_speed} acc:{data.acceleration:.2f}")
         else:
             # mid was not tracked:
             print(f"[{gate}] Vehicle {tracker_id} totalspeed: {data.speed:.2f} km/h")
@@ -180,10 +180,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.parse_args()
 
-    parser.add_argument("-p","--path", type=str, help = "Relative path to video file")
-    parser.add_argument("-d","--distance", type=str, help = "Distance between two delineators (in meters)")
-    parser.add_argument("-m","--model", type=str, help = "Optional: YOLO model used for vehicle detection (e.g., 'yolo12l.pt')")
-    parser.add_argument("--plot", type=bool, help = "Enables plotting for debugging or visualization")
+    parser.add_argument("-p", "--path", type=str, help="Relative path to video file")
+    parser.add_argument("-d", "--distance", type=str, help="Distance between two delineators (in meters)")
+    parser.add_argument("-m", "--model", type=str,
+                        help="Optional: YOLO model used for vehicle detection (e.g., 'yolo12l.pt')")
+    parser.add_argument("--plot", type=bool, help="Enables plotting for debugging or visualization")
 
     args = parser.parse_args()
 
@@ -200,20 +201,44 @@ if __name__ == "__main__":
     thickness = sv.calculate_optimal_line_thickness(resolution_wh=video_info.resolution_wh)
     text_scale = sv.calculate_optimal_text_scale(resolution_wh=video_info.resolution_wh)
 
-    raw_source, cluster1, cluster2 = get_coordinates(videoPath)
-    # TODO: transform raw source in something reliable
+    unsorted_coords, paired_delineators = get_coordinates(videoPath)
 
+    # Corners follow these rules:
+    # A: Left Upper Corner
+    # B: Right Upper Corner
+    # C: Right Bottom Corner
+    # D: Left Bottom Corner
 
+    sections = []
+    for i in range(len(paired_delineators) - 1):
+        bottom_pair = paired_delineators[i]
+        top_pair = paired_delineators[i + 1]
 
-    #raw_source = np.array([
-    #    [382, 456],  # A
-    #    [846, 435],  # B
-    #    [1742, 611],  # C
-    #    [642, 711]  # D
-    #])
+        section = {
+            "top_0": np.round(top_pair[0]),
+            "top_1": np.round(top_pair[1]),
+            "bottom_0": np.round(bottom_pair[0]),
+            "bottom_1": np.round(bottom_pair[1])
+        }
 
-    polygon_zone = sv.PolygonZone(raw_source)
-    view_transformer = ViewTransformer(source=raw_source)
+        sections.append(section)
+
+    source = np.array([sections[1]["top_0"],  # A
+                       sections[1]["top_1"],  # B
+                       sections[1]["bottom_1"],  # C
+                       sections[1]["bottom_0"]])  # D
+
+    print(source)
+
+    source = np.array([
+         [612, 286],
+         [1324, 348],
+         [1474, 417],
+         [367, 385]
+    ])
+
+    polygon_zone = sv.PolygonZone(source)
+    view_transformer = ViewTransformer(source=source)
 
     # calculate speed estimation range
     top_delta = TARGET_DELTA
@@ -256,13 +281,13 @@ if __name__ == "__main__":
             # Speed Estimation:
             # Case 1: Vehicle crosses bottom threshold (delta2 to TARGET_HEIGHT)
             if bottom_delta < y < TARGET_HEIGHT:
-                crossing_gate(data=data, gate="bottom", frame_counter=frame_counter)
+                crossing_gate(data=data, gate="bottom", frame_counter=frame_counter, distance=DISTANCE)
 
             # Case 2: Vehicle crosses top threshold (delta1 to 0)
             elif 0 < y < top_delta:
-                crossing_gate(data=data, gate="top", frame_counter=frame_counter)
+                crossing_gate(data=data, gate="top", frame_counter=frame_counter, distance=DISTANCE)
             elif mid_delta1 < y < mid_delta2:
-                crossing_gate(data=data, gate="middle", frame_counter=frame_counter)
+                crossing_gate(data=data, gate="middle", frame_counter=frame_counter, distance=DISTANCE)
 
             # Distance Estimation:
             if tracker_id not in distance_sums:
@@ -274,7 +299,7 @@ if __name__ == "__main__":
                 if other_id == tracker_id:
                     continue
 
-                scale_factor = DISTANCE / TARGET_HEIGHT # meters per pixel
+                scale_factor = DISTANCE / TARGET_HEIGHT  # meters per pixel
                 vertical_distance = abs(y - other_y) * scale_factor
 
                 # Update sum and count
@@ -291,7 +316,7 @@ if __name__ == "__main__":
 
         # Annotated Frame
         annotated_frame = frame.copy()
-        annotated_frame = sv.draw_polygon(annotated_frame, polygon=raw_source, color=sv.Color.RED)
+        annotated_frame = sv.draw_polygon(annotated_frame, polygon=source, color=sv.Color.RED)
         annotated_frame = box_annotator.annotate(scene=annotated_frame, detections=detections)
         annotated_frame = label_annotator.annotate(scene=annotated_frame, detections=detections, labels=labels)
 
