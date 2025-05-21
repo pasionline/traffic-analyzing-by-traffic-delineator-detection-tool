@@ -1,8 +1,11 @@
 import cv2
 import numpy as np
+from sklearn.cluster import KMeans
 from ultralytics import YOLO
 import supervision as sv
 import csv
+import argparse
+from typing import Tuple
 
 # Corners follow these rules:
 # A: Left Upper Corner
@@ -12,11 +15,8 @@ import csv
 
 TARGET_WIDTH = 30
 TARGET_HEIGHT = 100
-# Range in which the cars are tracked
+# Percentage Range in which the cars are tracked
 TARGET_DELTA = 3
-
-DISTANCE = 100  # difference in meters between two delineators
-HALF_DISTANCE = DISTANCE / 2
 
 TARGET = np.array(
     [
@@ -61,7 +61,7 @@ class VehicleData:
 
 
 # Returns point array of detected posts using a yolo model
-def get_coordinates(video_path) -> np.ndarray:
+def get_coordinates(video_path) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     model = YOLO(f'best_YOLOv12_traffic-delinator.pt')
     frame_gen = sv.get_video_frames_generator(video_path)
 
@@ -74,30 +74,56 @@ def get_coordinates(video_path) -> np.ndarray:
     slicer = sv.InferenceSlicer(callback=callback)
     detections = slicer(image)
 
-    # Rotating some frames, if vehicles blocking the view (uncommented bc it has a long runtime)
-    # i = 0
-    # while i < 50:
-    #    image = next(frame_generator)
-    #    nextDetections = slicer(image)
-    #    if len(nextDetections.xyxy) > len(detections.xyxy):
-    #        detections = nextDetections
-    #    i += 1
+    coords = detections.get_anchors_coordinates(anchor=sv.Position.BOTTOM_CENTER)
 
-    # Plotting the detection:
-    # box_annotator = sv.BoxAnnotator()
-    # label_annotator = sv.LabelAnnotator()
+    if len(coords) < 2:
+        print("Not enough points to cluster.")
+        return coords
 
-    # annotated_image = box_annotator.annotate(
-    #     scene=image, detections=detections)
-    #  annotated_image = label_annotator.annotate(
-    #       scene=annotated_image, detections=detections)
-    #
-    # sv.plot_image(annotated_image)
+    # Cluster into two groups
+    kmeans = KMeans(n_clusters=2, random_state=0).fit(coords)
+    labels = kmeans.labels_
+    cluster_0 = coords[labels == 0]
+    cluster_1 = coords[labels == 1]
 
-    return np.array(detections.get_anchors_coordinates(anchor=sv.Position.BOTTOM_CENTER))
+    # Fit lines to each cluster
+    def fit_line(points):
+        x = points[:, 0]
+        y = points[:, 1]
+        m, b = np.polyfit(x, y, 1)
+        return m, b
+
+    m0, b0 = fit_line(cluster_0)
+    m1, b1 = fit_line(cluster_1)
+
+    # Draw lines for visualization
+    img_with_lines = image.copy()
+
+    def draw_line(img, m, b, color):
+        h, w = img.shape[:2]
+        x1, y1 = 0, int(b)
+        x2, y2 = w, int(m * w + b)
+        cv2.line(img, (x1, y1), (x2, y2), color, 2)
+
+    draw_line(img_with_lines, m0, b0, (255, 0, 0))  # blue
+    draw_line(img_with_lines, m1, b1, (0, 255, 0))  # green
+
+    print(cluster_0, cluster_1)
+
+    for (x, y), label in zip(coords, labels):
+        cv2.circle(img_with_lines, (int(x), int(y)), 4, (0, 0, 255), -1)
+        cv2.putText(img_with_lines, str(label), (int(x) + 5, int(y) - 5),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+
+    cv2.imshow("Detected Lines", img_with_lines)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+    return np.array(coords), cluster_0, cluster_1
 
 
-def crossing_gate(data, gate, frame_counter):
+def crossing_gate(data, gate, frame_counter, distance):
+    half_distance = distance / 2
     opposite_gate = ""
     if gate == "bottom":
         opposite_gate = "top"
@@ -120,7 +146,7 @@ def crossing_gate(data, gate, frame_counter):
         frame_diff_start_to_end = abs(data.end_frame - data.start_frame)
 
         time_start_end = frame_diff_start_to_end / video_info.fps
-        data.speed = (DISTANCE / time_start_end) * 3.6
+        data.speed = (distance / time_start_end) * 3.6
 
         if data.middle_frame is not None:
             frame_diff_start_to_mid = abs(data.middle_frame - data.start_frame)
@@ -129,8 +155,8 @@ def crossing_gate(data, gate, frame_counter):
             time_start_mid = frame_diff_start_to_mid / video_info.fps
             time_mid_end = frame_diff_mid_to_end / video_info.fps
 
-            data.start_to_mid_speed = (HALF_DISTANCE / time_start_mid) * 3.6
-            data.mid_to_end_speed = (HALF_DISTANCE / time_mid_end) * 3.6
+            data.start_to_mid_speed = (half_distance / time_start_mid) * 3.6
+            data.mid_to_end_speed = (half_distance / time_mid_end) * 3.6
             data.acceleration = (data.mid_to_end_speed - data.start_to_mid_speed) / time_mid_end
 
             # average distances
@@ -150,10 +176,23 @@ def crossing_gate(data, gate, frame_counter):
 
 if __name__ == "__main__":
 
-    videoPath = "pixabay_test.mp4"
+    # Initialize parser
+    parser = argparse.ArgumentParser()
+    parser.parse_args()
+
+    parser.add_argument("-p","--path", type=str, help = "Relative path to video file")
+    parser.add_argument("-d","--distance", type=str, help = "Distance between two delineators (in meters)")
+    parser.add_argument("-m","--model", type=str, help = "Optional: YOLO model used for vehicle detection (e.g., 'yolo12l.pt')")
+    parser.add_argument("--plot", type=bool, help = "Enables plotting for debugging or visualization")
+
+    args = parser.parse_args()
+
+    videoPath = args.path if args.path else "example-videos/example.mp4"
+    DISTANCE = args.distance if args.distance else 50.0  # default 50 meters
+    modelType = args.model if args.model else "yolo12l.pt"
 
     video_info = sv.VideoInfo.from_video_path(videoPath)
-    model = YOLO("yolo11l.pt")
+    model = YOLO(modelType)
 
     byte_track = sv.ByteTrack(frame_rate=video_info.fps)
 
@@ -161,8 +200,10 @@ if __name__ == "__main__":
     thickness = sv.calculate_optimal_line_thickness(resolution_wh=video_info.resolution_wh)
     text_scale = sv.calculate_optimal_text_scale(resolution_wh=video_info.resolution_wh)
 
-    raw_source = get_coordinates("vehicles.mp4")
+    raw_source, cluster1, cluster2 = get_coordinates(videoPath)
     # TODO: transform raw source in something reliable
+
+
 
     #raw_source = np.array([
     #    [382, 456],  # A
@@ -233,7 +274,9 @@ if __name__ == "__main__":
                 if other_id == tracker_id:
                     continue
 
-                vertical_distance = abs(y - other_y)
+                scale_factor = DISTANCE / TARGET_HEIGHT # meters per pixel
+                vertical_distance = abs(y - other_y) * scale_factor
+
                 # Update sum and count
                 distance_sums[tracker_id][other_id] = distance_sums[tracker_id].get(other_id, 0) + vertical_distance
                 distance_counts[tracker_id][other_id] = distance_counts[tracker_id].get(other_id, 0) + 1

@@ -15,9 +15,9 @@ This tool makes uses fine-tuned YOLOv12x [YOLOv12_traffic-delineator](https://hu
 
 ## Installation
 
-### (Optional) Prerequisites
-If you want to run Torch with CUDA, make sure to get the correct version from: https://pytorch.org/get-started/locally/
-
+### Prerequisites
+- (Optional) If you want to run Torch with CUDA, make sure to get the correct version from: https://pytorch.org/get-started/locally/
+- Python 3.12.9
 ### Steps
 
 1. Clone the repository:
@@ -32,7 +32,7 @@ If you want to run Torch with CUDA, make sure to get the correct version from: h
    ```bash
    pip install -r requirements.txt
 ## Usage
-To make analyze over a existing video, use this command:
+To make analyze over an existing video, use this command:
 ```bash
 python analyze_video.py -p path/to/the/video.mp4
 ```
