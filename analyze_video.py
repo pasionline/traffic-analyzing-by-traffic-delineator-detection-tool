@@ -69,7 +69,7 @@ def get_coordinates(video_path) -> Tuple[np.ndarray, List[Tuple[np.ndarray, np.n
 
     # Rotating the first couple of frames in case a Vehicle blocks the vision on a delineator
     i = 0
-    while i < 10:
+    while i < 20:
         image = next(frame_gen)
 
         nextDetections = slicer(image)
@@ -188,7 +188,8 @@ def crossing_gate(data, gate, frame_counter, distance):
                 avg = total / count
                 avg_distances[other_id] = round(avg, 2)
 
-            data.vertical_average_distances = avg_distances
+            avg_d_clean = {int(k): float(v) for k, v in avg_distances.items()}
+            data.vertical_average_distances = avg_d_clean
             print(
                 f"[{gate}] Vehicle {tracker_id} totalspeed: {data.speed:.2f} km/h midspeed: {data.start_to_mid_speed} endspeed: {data.mid_to_end_speed} acc:{data.acceleration:.2f}")
         else:
@@ -313,8 +314,10 @@ if __name__ == "__main__":
 
             for other_id, [_, other_y] in zip(detections.tracker_id, vehicle_target_coords):
                 other_data = vehicle_data.get(other_id)
+                if other_data is None or data is None:
+                    continue
                 # skip same vehicle
-                if other_id == tracker_id:
+                if other_id == tracker_id and other_data.first_crossed != data.first_crossed:
                     continue
 
                 scale_factor = DISTANCE / TARGET_HEIGHT  # meters per pixel
@@ -368,7 +371,8 @@ if __name__ == "__main__":
             "start_to_mid_speed",
             "mid_to_end_speed",
             "acceleration",
-            "average_vertical_distances"
+            "average_vertical_distances",
+            "valid"
         ]
         writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
         writer.writeheader()
@@ -384,5 +388,6 @@ if __name__ == "__main__":
                 "start_to_mid_speed": round(data.start_to_mid_speed, 2) if data.start_to_mid_speed else None,
                 "mid_to_end_speed": round(data.mid_to_end_speed, 2) if data.mid_to_end_speed else None,
                 "acceleration": round(data.acceleration, 2) if data.acceleration else None,
-                "average_vertical_distances": data.vertical_average_distances
+                "average_vertical_distances": data.vertical_average_distances,
+                "valid": bool(data.end_frame is not None)
             })
