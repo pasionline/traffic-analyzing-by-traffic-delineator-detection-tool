@@ -7,10 +7,10 @@ import csv
 import argparse
 from typing import List, Tuple
 
-TARGET_WIDTH = 30
+TARGET_WIDTH = 50
 TARGET_HEIGHT = 100
 # Percentage Range in which the cars are tracked
-TARGET_DELTA = 3
+TARGET_DELTA = 5
 
 TARGET = np.array(
     [
@@ -64,9 +64,31 @@ def get_coordinates(video_path) -> Tuple[np.ndarray, List[Tuple[np.ndarray, np.n
         return sv.Detections.from_ultralytics(result)
 
     image = next(frame_gen)
-
     slicer = sv.InferenceSlicer(callback=callback)
     detections = slicer(image)
+
+    # Rotating the first couple of frames in case a Vehicle blocks the vision on a delineator
+    i = 0
+    while i < 10:
+        image = next(frame_gen)
+
+        nextDetections = slicer(image)
+        if len(nextDetections.xyxy) > len(detections.xyxy):
+            detections = nextDetections
+        next(frame_gen)
+        next(frame_gen)
+        i += 1
+
+    # Plotting the detection:
+    box_annotator = sv.BoxAnnotator()
+    label_annotator = sv.LabelAnnotator()
+
+    annotated_image = box_annotator.annotate(
+         scene=image, detections=detections)
+    annotated_image = label_annotator.annotate(
+           scene=annotated_image, detections=detections)
+
+    sv.plot_image(annotated_image)
 
     coords = detections.get_anchors_coordinates(anchor=sv.Position.BOTTOM_CENTER)
 
@@ -181,16 +203,17 @@ if __name__ == "__main__":
     parser.parse_args()
 
     parser.add_argument("-p", "--path", type=str, help="Relative path to video file")
-    parser.add_argument("-d", "--distance", type=str, help="Distance between two delineators (in meters)")
+    parser.add_argument("-d", "--distance", type=str, help="Distance between two delineators (in meters, default: 50m)")
     parser.add_argument("-m", "--model", type=str,
                         help="Optional: YOLO model used for vehicle detection (e.g., 'yolo12l.pt')")
-    parser.add_argument("--plot", type=bool, help="Enables plotting for debugging or visualization")
+    parser.add_argument("--plot", type=str, help="Enables plotting for debugging or visualization")
 
     args = parser.parse_args()
 
     videoPath = args.path if args.path else "example-videos/example.mp4"
     DISTANCE = args.distance if args.distance else 50.0  # default 50 meters
     modelType = args.model if args.model else "yolo12l.pt"
+    plot = True if args.plot else False
 
     video_info = sv.VideoInfo.from_video_path(videoPath)
     model = YOLO(modelType)
@@ -223,19 +246,13 @@ if __name__ == "__main__":
 
         sections.append(section)
 
-    source = np.array([sections[1]["top_0"],  # A
-                       sections[1]["top_1"],  # B
-                       sections[1]["bottom_1"],  # C
-                       sections[1]["bottom_0"]])  # D
-
+    source = np.array([sections[0]["top_0"],  # A
+                       sections[0]["top_1"],  # B
+                       sections[0]["bottom_1"],  # C
+                       sections[0]["bottom_0"]]  # D
+                      , dtype="int32")
     print(source)
 
-    source = np.array([
-         [612, 286],
-         [1324, 348],
-         [1474, 417],
-         [367, 385]
-    ])
 
     polygon_zone = sv.PolygonZone(source)
     view_transformer = ViewTransformer(source=source)
@@ -295,6 +312,7 @@ if __name__ == "__main__":
                 distance_counts[tracker_id] = {}
 
             for other_id, [_, other_y] in zip(detections.tracker_id, vehicle_target_coords):
+                other_data = vehicle_data.get(other_id)
                 # skip same vehicle
                 if other_id == tracker_id:
                     continue
