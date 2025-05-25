@@ -68,7 +68,7 @@ def get_coordinates(video_path) -> list[tuple[Any, Any]]:
 
     # Rotating the first couple of frames in case a Vehicle blocks the vision on a delineator
     i = 0
-    while i < 10:
+    while i < 5:
         image = next(frame_gen)
 
         nextDetections = slicer(image)
@@ -85,7 +85,7 @@ def get_coordinates(video_path) -> list[tuple[Any, Any]]:
     # Suppose coords is your (N,2) array of points
     coords = np.array(coords, dtype=np.int32)
 
-    coords = filter_close_points(coords, delta=30)
+    coords = filter_close_points(coords, delta=50)
 
     # Compute the convex hull (returns ordered points)
     hull = cv2.convexHull(coords)
