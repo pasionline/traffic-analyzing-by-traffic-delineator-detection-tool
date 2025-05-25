@@ -5,7 +5,7 @@ from ultralytics import YOLO
 import supervision as sv
 import csv
 import argparse
-from typing import List, Tuple
+from typing import List, Tuple, Any
 
 TARGET_WIDTH = 50
 TARGET_HEIGHT = 100
@@ -55,7 +55,7 @@ class VehicleData:
 
 
 # Returns point array of detected posts using a yolo model
-def get_coordinates(video_path) -> Tuple[np.ndarray, List[Tuple[np.ndarray, np.ndarray]]]:
+def get_coordinates(video_path) -> list[tuple[Any, Any]]:
     model = YOLO(f'best_YOLOv12_traffic-delinator.pt')
     frame_gen = sv.get_video_frames_generator(video_path)
 
@@ -69,78 +69,138 @@ def get_coordinates(video_path) -> Tuple[np.ndarray, List[Tuple[np.ndarray, np.n
 
     # Rotating the first couple of frames in case a Vehicle blocks the vision on a delineator
     i = 0
-    while i < 20:
+    while i < 10:
         image = next(frame_gen)
 
         nextDetections = slicer(image)
         if len(nextDetections.xyxy) > len(detections.xyxy):
             detections = nextDetections
-        next(frame_gen)
-        next(frame_gen)
+        j = 0
+        while (j < 5):
+            next(frame_gen)
+            j += 1
         i += 1
-
-    # Plotting the detection:
-    box_annotator = sv.BoxAnnotator()
-    label_annotator = sv.LabelAnnotator()
-
-    annotated_image = box_annotator.annotate(
-         scene=image, detections=detections)
-    annotated_image = label_annotator.annotate(
-           scene=annotated_image, detections=detections)
-
-    sv.plot_image(annotated_image)
 
     coords = detections.get_anchors_coordinates(anchor=sv.Position.BOTTOM_CENTER)
 
-    if len(coords) < 4:
-        print("Not enough points to cluster.")
-        exit(-1)
+    # Suppose coords is your (N,2) array of points
+    coords = np.array(coords, dtype=np.int32)
 
-    # Cluster into two groups
-    kmeans = KMeans(n_clusters=2, random_state=0).fit(coords)
-    labels = kmeans.labels_
-    cluster_0 = coords[labels == 0]
-    cluster_1 = coords[labels == 1]
+    # Compute the convex hull (returns ordered points)
+    hull = cv2.convexHull(coords)
 
-    # Fit lines to each cluster
-    def fit_line(points):
-        x = points[:, 0]
-        y = points[:, 1]
-        m, b = np.polyfit(x, y, 1)
-        return m, b
+    # Convert image to HSV colorspace
+    hsv_image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)  # Define range of colors in HSV
+    lower_white = np.array([0, 0, 200])
+    upper_white = np.array([255, 20, 255])  # Threshold the HSV image to get only blue colors
+    white_mask = cv2.inRange(hsv_image, lower_white, upper_white)
+    color_isolated = cv2.bitwise_and(image, image, mask=white_mask)
+    # Convert to Grayscale
+    gray = cv2.cvtColor(color_isolated, cv2.COLOR_RGB2GRAY)  # Define a kernel size and apply Gaussian smoothing
+    kernel_size = 5
+    blur_gray = cv2.GaussianBlur(gray, (kernel_size, kernel_size), 0)
+    # Perform edge detection
+    edges = cv2.Canny(blur_gray, 50, 150)
 
-    m0, b0 = fit_line(cluster_0)
-    m1, b1 = fit_line(cluster_1)
+    # Next we'll create a masked edges image using cv2.fillPoly()
+    mask = np.zeros_like(edges)
+    ignore_mask_color = 255
 
-    # Draw lines for visualization
-    img_with_lines = image.copy()
+    # Do the Masking
+    cv2.fillPoly(mask, [hull], ignore_mask_color)
+    masked_edges = cv2.bitwise_and(edges, mask)
 
-    def draw_line(img, m, b, color):
-        h, w = img.shape[:2]
-        x1, y1 = 0, int(b)
-        x2, y2 = w, int(m * w + b)
-        cv2.line(img, (x1, y1), (x2, y2), color, 2)
+    # Apply Probabilistic Hough Line Transform
+    lines = cv2.HoughLinesP(masked_edges, 1, np.pi / 180, 50, minLineLength=50, maxLineGap=10)
 
-    draw_line(img_with_lines, m0, b0, (255, 0, 0))  # blue
-    draw_line(img_with_lines, m1, b1, (0, 255, 0))  # green
+    # Iterate over the output "lines" to calculate m's and b's
+    mxb = []
+    for line in lines:
+        for x1, y1, x2, y2 in line:
+            if x2 == x1:  # avoid division by zero
+                continue
+            m = (y2 - y1) / (x2 - x1)
+            b = y1 - m * x1
+            mxb.append([m, b])
 
-    for (x, y), label in zip(coords, labels):
-        cv2.circle(img_with_lines, (int(x), int(y)), 4, (0, 0, 255), -1)
-        cv2.putText(img_with_lines, str(label), (int(x) + 5, int(y) - 5),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+    # Now find pairs of parallel lines
+    parallel_pairs = []
+    threshold = 0.1  # adjust for what you consider "parallel"
+    for i, line1 in enumerate(mxb):
+        for j, line2 in enumerate(mxb):
+            if i >= j:
+                continue  # avoid duplicate pairs
+            if abs(line1[0] - line2[0]) < threshold:
+                parallel_pairs.append((line1, line2))
 
-    cv2.imshow("Detected Lines", img_with_lines)
+    # get median line
+    mxb = np.array(mxb)
+    if mxb.shape[0] == 0:
+        print("No valid lines detected.")
+    else:
+        median_m = np.median(mxb[:, 0])
+        median_b = np.median(mxb[:, 1])
+
+    above = []
+    below = []
+    for pt in coords:
+        x, y = pt
+        y_on_line = median_m * x + median_b
+        if y < y_on_line:  # image y-axis: 'above' line means numerically less
+            above.append(pt)
+        else:
+            below.append(pt)
+
+    above = np.array(above)
+    below = np.array(below)
+
+    for pt in coords:
+        x, y = int(pt[0]), int(pt[1])
+        y_on_line = median_m * x + median_b
+        if y < y_on_line:
+            label = "Above"
+            color = (0, 255, 0)  # Green
+        else:
+            label = "Below"
+            color = (0, 0, 255)  # Red
+        cv2.circle(image, (x, y), 5, color, -1)
+        cv2.putText(
+            image,
+            label,
+            (x + 5, y - 5),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            color,
+            1,
+            cv2.LINE_AA
+        )
+
+    # Draw Median line green
+    height, width = image.shape[:2]
+    x1, x2 = 0, width - 1
+    y1 = int(median_m * x1 + median_b)
+    y2 = int(median_m * x2 + median_b)
+    cv2.line(image, (x1, y1), (x2, y2), (0, 255, 0), 2)
+
+
+    # Draw the lines on the original image
+    if lines is not None:
+        for line in lines:
+            x1, y1, x2, y2 = line[0]
+            cv2.line(image, (x1, y1), (x2, y2), (0, 0, 255), 2)
+
+    # Display the result
+    cv2.imshow('Lines Detected', image)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
-    # sort clusters by y-coord
-    cluster_0 = cluster_0[np.argsort(cluster_0[:, 1])[::-1]]
-    cluster_1 = cluster_1[np.argsort(cluster_1[:, 1])[::-1]]
-    print(cluster_0, cluster_1)
-    # pair them:
-    paired_delineators = list(zip(cluster_0, cluster_1))
+    above = above[np.argsort(above[:, 1])[::-1]]
+    below = below[np.argsort(below[:, 1])[::-1]]
 
-    return np.array(coords), paired_delineators
+    # pair them:
+    paired_delineators = list(zip(above, below))
+
+    return paired_delineators
 
 
 def crossing_gate(data, gate, frame_counter, distance):
@@ -197,17 +257,46 @@ def crossing_gate(data, gate, frame_counter, distance):
             print(f"[{gate}] Vehicle {tracker_id} totalspeed: {data.speed:.2f} km/h")
 
 
+def parse_source_file(filename, width, height):
+    points = []
+    with open(filename, "r") as f:
+        for line in f:
+            # Remove whitespace and split by comma or space
+            line = line.strip()
+            # skip comments:
+            if '#' in line:
+                continue
+            elif ',' in line:
+                x_str, y_str = line.split(',')
+            else:
+                x_str, y_str = line.split()
+
+            x_int = int(x_str)
+            y_int = int(y_str)
+
+            if x_int > width or x_int < 0 or y_int > height or y_int < 0:
+                return [[-1, -1], [-1, -1], [-1, -1], [-1, -1]]
+            else:
+                points.append([x_int, y_int])
+
+    points = np.array(points, dtype=np.int32)
+    if points.shape != (4, 2):
+        return [[-1, -1], [-1, -1], [-1, -1], [-1, -1]]
+    return points
+
+
 if __name__ == "__main__":
 
     # Initialize parser
     parser = argparse.ArgumentParser()
-    parser.parse_args()
 
     parser.add_argument("-p", "--path", type=str, help="Relative path to video file")
     parser.add_argument("-d", "--distance", type=str, help="Distance between two delineators (in meters, default: 50m)")
     parser.add_argument("-m", "--model", type=str,
                         help="Optional: YOLO model used for vehicle detection (e.g., 'yolo12l.pt')")
-    parser.add_argument("--plot", type=str, help="Enables plotting for debugging or visualization")
+    parser.add_argument("--plot", action="store_true", help="Enables plotting for debugging or visualization")
+    parser.add_argument("--source_file", action="store_true",
+                        help="Optional: Avoid detection, use custom source points in the text file")
 
     args = parser.parse_args()
 
@@ -225,7 +314,34 @@ if __name__ == "__main__":
     thickness = sv.calculate_optimal_line_thickness(resolution_wh=video_info.resolution_wh)
     text_scale = sv.calculate_optimal_text_scale(resolution_wh=video_info.resolution_wh)
 
-    unsorted_coords, paired_delineators = get_coordinates(videoPath)
+    custom_source_flag = False
+    sections = []
+    source = np.array([])
+    if args.source_file:
+        custom_source = parse_source_file("custom_source_points.yaml", video_info.width, video_info.height)
+        custom_source_flag = True
+        if custom_source.any() == -1:
+            custom_source_flag = False
+        else:
+            source = custom_source
+    if not custom_source_flag:
+        paired_delineators = get_coordinates(videoPath)
+        for i in range(len(paired_delineators) - 1):
+            bottom_pair = paired_delineators[i]
+            top_pair = paired_delineators[i + 1]
+            section = {
+                "top_0": np.round(top_pair[0]),
+                "top_1": np.round(top_pair[1]),
+                "bottom_0": np.round(bottom_pair[0]),
+                "bottom_1": np.round(bottom_pair[1])
+            }
+
+            sections.append(section)
+        source = np.array([sections[0]["top_0"],  # A
+                           sections[0]["top_1"],  # B
+                           sections[0]["bottom_1"],  # C
+                           sections[0]["bottom_0"]]  # D
+                          , dtype="int32")
 
     # Corners follow these rules:
     # A: Left Upper Corner
@@ -233,27 +349,8 @@ if __name__ == "__main__":
     # C: Right Bottom Corner
     # D: Left Bottom Corner
 
-    sections = []
-    for i in range(len(paired_delineators) - 1):
-        bottom_pair = paired_delineators[i]
-        top_pair = paired_delineators[i + 1]
 
-        section = {
-            "top_0": np.round(top_pair[0]),
-            "top_1": np.round(top_pair[1]),
-            "bottom_0": np.round(bottom_pair[0]),
-            "bottom_1": np.round(bottom_pair[1])
-        }
-
-        sections.append(section)
-
-    source = np.array([sections[0]["top_0"],  # A
-                       sections[0]["top_1"],  # B
-                       sections[0]["bottom_1"],  # C
-                       sections[0]["bottom_0"]]  # D
-                      , dtype="int32")
     print(source)
-
 
     polygon_zone = sv.PolygonZone(source)
     view_transformer = ViewTransformer(source=source)

@@ -32,9 +32,29 @@ This tool makes uses fine-tuned YOLOv12x [YOLOv12_traffic-delineator](https://hu
    ```bash
    pip install -r requirements.txt
 ## Usage
-To make analyze over an existing video, use this command:
+For simply analyzing an existing video with a delineator-gap distance of 50 meters, use this command:
 ```bash
 python analyze_video.py -p path/to/the/video.mp4
+```
+
+Run an analysis with a custom distance:
+
+```bash
+python analyze_video.py -p path/to/the/video.mp4 -d 100
+```
+
+### Optional:
+
+Switch the YOLO model which detects vehicles (default model is yolo12l.pt:
+
+```bash
+python analyze_video.py -p path/to/the/video.mp4 -m yolo12n.pt
+```
+
+Enable plotting/visualization: 
+
+```bash
+python analyze_video.py -p path/to/the/video.mp4 --plot
 ```
 
 ## License

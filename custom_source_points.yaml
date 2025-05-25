@@ -1,0 +1,13 @@
+# Corners follow these rules:
+# A: Left Upper Corner
+# B: Right Upper Corner
+# C: Right Bottom Corner
+# D: Left Bottom Corner
+# A
+370,398
+# B
+1845,576
+# C
+1845,598
+# D
+8,516
