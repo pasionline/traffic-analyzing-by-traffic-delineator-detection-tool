@@ -1,11 +1,10 @@
 import cv2
 import numpy as np
-from sklearn.cluster import KMeans
 from ultralytics import YOLO
 import supervision as sv
 import csv
 import argparse
-from typing import List, Tuple, Any
+from typing import Any
 
 TARGET_WIDTH = 50
 TARGET_HEIGHT = 100
@@ -85,6 +84,8 @@ def get_coordinates(video_path) -> list[tuple[Any, Any]]:
 
     # Suppose coords is your (N,2) array of points
     coords = np.array(coords, dtype=np.int32)
+
+    coords = filter_close_points(coords, delta=30)
 
     # Compute the convex hull (returns ordered points)
     hull = cv2.convexHull(coords)
@@ -182,7 +183,6 @@ def get_coordinates(video_path) -> list[tuple[Any, Any]]:
     y2 = int(median_m * x2 + median_b)
     cv2.line(image, (x1, y1), (x2, y2), (0, 255, 0), 2)
 
-
     # Draw the lines on the original image
     if lines is not None:
         for line in lines:
@@ -202,6 +202,20 @@ def get_coordinates(video_path) -> list[tuple[Any, Any]]:
 
     return paired_delineators
 
+def filter_close_points(coords, delta=10):
+    coords = np.array(coords)
+    filtered = []
+    used = np.zeros(len(coords), dtype=bool)
+
+    for i, point in enumerate(coords):
+        if used[i]:
+            continue
+        # Mark all points within delta as used
+        dists = np.linalg.norm(coords - point, axis=1)
+        close_idxs = np.where(dists < delta)[0]
+        used[close_idxs] = True
+        filtered.append(point)
+    return np.array(filtered)
 
 def crossing_gate(data, gate, frame_counter, distance):
     half_distance = distance / 2
@@ -343,14 +357,6 @@ if __name__ == "__main__":
                            sections[0]["bottom_0"]]  # D
                           , dtype="int32")
 
-    # Corners follow these rules:
-    # A: Left Upper Corner
-    # B: Right Upper Corner
-    # C: Right Bottom Corner
-    # D: Left Bottom Corner
-
-
-    print(source)
 
     polygon_zone = sv.PolygonZone(source)
     view_transformer = ViewTransformer(source=source)
