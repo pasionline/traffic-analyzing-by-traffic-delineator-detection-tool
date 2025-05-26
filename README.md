@@ -1,7 +1,7 @@
 # Traffic Analyzing Tool
 
 **Description**  
-This tool makes uses fine-tuned YOLOv12x [YOLOv12_traffic-delineator](https://huggingface.co/maco018/YOLOv12_traffic-delineator) model which detects traffic delineators and calculates the speed, acceleration and the average distance to other vehicles and saves those data to CSV.
+This tool uses a fine-tuned YOLOv12x [YOLOv12_traffic-delineator](https://huggingface.co/maco018/YOLOv12_traffic-delineator) model which detects traffic delineators and calculates the speed, acceleration and the average distance to other vehicles and saves those data to CSV.
 
 ---
 
