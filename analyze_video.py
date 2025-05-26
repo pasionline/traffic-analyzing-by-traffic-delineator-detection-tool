@@ -87,6 +87,9 @@ def get_coordinates(video_path) -> list[tuple[Any, Any]]:
 
     coords = filter_close_points(coords, delta=50)
 
+    if len(detections.xyxy) < 4:
+        raise Exception('Not enough detections to form a region of interest')
+
     # Compute the convex hull (returns ordered points)
     hull = cv2.convexHull(coords)
 
@@ -113,6 +116,9 @@ def get_coordinates(video_path) -> list[tuple[Any, Any]]:
 
     # Apply Probabilistic Hough Line Transform
     lines = cv2.HoughLinesP(masked_edges, 1, np.pi / 180, 50, minLineLength=50, maxLineGap=10)
+
+    if len(lines) <= 0:
+        raise Exception('No lines detected')
 
     # Iterate over the output "lines" to calculate m's and b's
     mxb = []
