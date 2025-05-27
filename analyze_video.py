@@ -1,3 +1,4 @@
+import os
 import cv2
 import numpy as np
 from ultralytics import YOLO
@@ -304,6 +305,42 @@ def parse_source_file(filename, width, height):
         return [[-1, -1], [-1, -1], [-1, -1], [-1, -1]]
     return points
 
+def export_vehicle_data(vehicle_data, filename):
+    os.makedirs("csv_exports", exist_ok=True)
+    filepath = os.path.join("csv_exports", filename)
+    # CSV Export
+    with open(filepath, mode="w", newline="") as csv_file:
+        fieldnames = [
+            "tracking_id",
+            "start_frame",
+            "middle_frame",
+            "end_frame",
+            "first_crossed",
+            "speed",
+            "start_to_mid_speed",
+            "mid_to_end_speed",
+            "acceleration",
+            "average_vertical_distances",
+            "valid"
+        ]
+        writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+        writer.writeheader()
+
+        for data in vehicle_data.values():
+            writer.writerow({
+                "tracking_id": data.tracking_id,
+                "start_frame": data.start_frame,
+                "middle_frame": data.middle_frame,
+                "end_frame": data.end_frame,
+                "first_crossed": data.first_crossed,
+                "speed": round(data.speed, 2) if data.speed else None,
+                "start_to_mid_speed": round(data.start_to_mid_speed, 2) if data.start_to_mid_speed else None,
+                "mid_to_end_speed": round(data.mid_to_end_speed, 2) if data.mid_to_end_speed else None,
+                "acceleration": round(data.acceleration, 2) if data.acceleration else None,
+                "average_vertical_distances": data.vertical_average_distances,
+                "valid": bool(data.end_frame is not None)
+            })
+
 
 if __name__ == "__main__":
 
@@ -468,35 +505,6 @@ if __name__ == "__main__":
 
     cv2.destroyAllWindows()
 
-    # CSV Export
-    with open("vehicle_data.csv", mode="w", newline="") as csv_file:
-        fieldnames = [
-            "tracking_id",
-            "start_frame",
-            "middle_frame",
-            "end_frame",
-            "first_crossed",
-            "speed",
-            "start_to_mid_speed",
-            "mid_to_end_speed",
-            "acceleration",
-            "average_vertical_distances",
-            "valid"
-        ]
-        writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
-        writer.writeheader()
+    base, _ = os.path.splitext(os.path.basename(videoPath))
+    export_vehicle_data(vehicle_data, base + '.csv')
 
-        for data in vehicle_data.values():
-            writer.writerow({
-                "tracking_id": data.tracking_id,
-                "start_frame": data.start_frame,
-                "middle_frame": data.middle_frame,
-                "end_frame": data.end_frame,
-                "first_crossed": data.first_crossed,
-                "speed": round(data.speed, 2) if data.speed else None,
-                "start_to_mid_speed": round(data.start_to_mid_speed, 2) if data.start_to_mid_speed else None,
-                "mid_to_end_speed": round(data.mid_to_end_speed, 2) if data.mid_to_end_speed else None,
-                "acceleration": round(data.acceleration, 2) if data.acceleration else None,
-                "average_vertical_distances": data.vertical_average_distances,
-                "valid": bool(data.end_frame is not None)
-            })
