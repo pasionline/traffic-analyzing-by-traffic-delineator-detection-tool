@@ -9,7 +9,7 @@ from typing import Any
 TARGET_WIDTH = 75
 TARGET_HEIGHT = 150
 # Percentage Range in which the cars are tracked
-TARGET_DELTA = 0.5 * TARGET_HEIGHT
+TARGET_DELTA = 0.05 * TARGET_HEIGHT
 
 TARGET = np.array(
     [
