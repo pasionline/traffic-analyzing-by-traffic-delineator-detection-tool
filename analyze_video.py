@@ -6,10 +6,10 @@ import csv
 import argparse
 from typing import Any
 
-TARGET_WIDTH = 50
-TARGET_HEIGHT = 100
+TARGET_WIDTH = 75
+TARGET_HEIGHT = 150
 # Percentage Range in which the cars are tracked
-TARGET_DELTA = 5
+TARGET_DELTA = 0.5 * TARGET_HEIGHT
 
 TARGET = np.array(
     [
