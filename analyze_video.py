@@ -1,6 +1,7 @@
 import os
 import cv2
 import numpy as np
+from sklearn.linear_model import RANSACRegressor
 from ultralytics import YOLO
 import supervision as sv
 import csv
@@ -86,8 +87,38 @@ def get_coordinates(video_path) -> list[tuple[Any, Any]]:
     # Suppose coords is your (N,2) array of points
     coords = np.array(coords, dtype=np.int32)
 
-    coords = filter_close_points(coords, delta=50)
+    above, below = find_pairs_hough_line_transform(coords, image)
 
+    above = above[np.argsort(above[:, 1])[::-1]]
+    below = below[np.argsort(below[:, 1])[::-1]]
+
+    # pair them:
+    paired_delineators = list(zip(above, below))
+
+    return paired_delineators
+
+
+
+def find_best_line(X_data, y_data):
+    if len(X_data) < 2:
+        return None, None, None
+
+    ransac = RANSACRegressor(
+        min_samples=2,  # Mindestpunkte für eine Linie
+        residual_threshold=15.0,  # Max. Abstand zur Linie (Pixel), um Inlier zu sein
+        max_trials=1000  # Anzahl der Versuche
+    )
+    ransac.fit(X_data, y_data)
+
+    inlier_mask = ransac.inlier_mask_
+    outlier_mask = np.logical_not(inlier_mask)
+
+    return ransac, inlier_mask, outlier_mask
+
+def find_pairs_hough_line_transform(coords, image):
+    # THIS METHOD IS USED TO FIND WHITE EDGES AND USE THE MEDIAN LINE TO SEPERATE LEFT AND RIGHT
+    coords = filter_close_points(coords, delta=50)
+    print(coords)
     if len(detections.xyxy) < 4:
         raise Exception('Not enough detections to form a region of interest')
 
@@ -132,14 +163,16 @@ def get_coordinates(video_path) -> list[tuple[Any, Any]]:
             mxb.append([m, b])
 
     # Now find pairs of parallel lines
-    parallel_pairs = []
-    threshold = 0.1  # adjust for what you consider "parallel"
-    for i, line1 in enumerate(mxb):
-        for j, line2 in enumerate(mxb):
-            if i >= j:
-                continue  # avoid duplicate pairs
-            if abs(line1[0] - line2[0]) < threshold:
-                parallel_pairs.append((line1, line2))
+    # parallel_pairs = []
+    # threshold = 0.2  # adjust for what you consider "parallel"
+    # for i, line1 in enumerate(mxb):
+    #    for j, line2 in enumerate(mxb):
+    #        if i >= j:
+    #            continue  # avoid duplicate pairs
+    #        if abs(line1[0] - line2[0]) < threshold:
+    #            parallel_pairs.append(line1)
+    #            parallel_pairs.append(line2)
+    # parallel_pairs = np.array(parallel_pairs)
 
     # get median line
     mxb = np.array(mxb)
@@ -201,13 +234,8 @@ def get_coordinates(video_path) -> list[tuple[Any, Any]]:
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
-    above = above[np.argsort(above[:, 1])[::-1]]
-    below = below[np.argsort(below[:, 1])[::-1]]
+    return above, below
 
-    # pair them:
-    paired_delineators = list(zip(above, below))
-
-    return paired_delineators
 
 def filter_close_points(coords, delta=10):
     coords = np.array(coords)
