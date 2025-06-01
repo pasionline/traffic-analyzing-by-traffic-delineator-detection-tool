@@ -56,7 +56,7 @@ class VehicleData:
 
 
 # Returns point array of detected posts using a yolo model
-def get_coordinates(video_path) -> list[tuple[Any, Any]]:
+def get_coordinates(video_path, calibration) -> list[tuple[Any, Any]]:
     model = YOLO(f'best_YOLOv12_traffic-delinator.pt')
     frame_gen = sv.get_video_frames_generator(video_path)
 
@@ -87,7 +87,10 @@ def get_coordinates(video_path) -> list[tuple[Any, Any]]:
     # Suppose coords is your (N,2) array of points
     coords = np.array(coords, dtype=np.int32)
 
-    above, below = find_pairs_hough_line_transform(coords, image)
+    if (calibration == "ransac"):
+        above, below = find_pairs_hough_line_transform(coords, image)
+    elif (calibration == "houghline"):
+        above, below = find_pairs_ransac(coords, image)
 
     above = above[np.argsort(above[:, 1])[::-1]]
     below = below[np.argsort(below[:, 1])[::-1]]
@@ -98,8 +101,69 @@ def get_coordinates(video_path) -> list[tuple[Any, Any]]:
     return paired_delineators
 
 
+def find_pairs_ransac(coords, image):
+    X = coords[:, 0].reshape(-1, 1)
+    y = coords[:, 1]
+
+    # First RANSAC Line
+    ransac1, inlier_mask1, outlier_mask1 = find_best_line(X, y)
+
+    if ransac1:
+        X_line1 = X[inlier_mask1]
+        y_line1 = y[inlier_mask1]
+        X_remaining = X[outlier_mask1]
+        y_remaining = y[outlier_mask1]
+
+        # Second RANSAC Line
+        ransac2, inlier_mask2, outlier_mask2 = find_best_line(X_remaining, y_remaining)
+
+        if ransac2:
+            X_line2 = X_remaining[inlier_mask2]
+            y_line2 = y_remaining[inlier_mask2]
+            X_noise = X_remaining[outlier_mask2]
+            y_noise = y_remaining[outlier_mask2]
+        else:
+            X_line2, y_line2 = np.array([]), np.array([])
+            X_noise, y_noise = X_remaining, y_remaining
+    else:
+        print("No Lines detected")
+        X_line1, y_line1, X_line2, y_line2, X_noise, y_noise = [np.array([])] * 6
+
+    # Plot points:
+    for pt in np.hstack((X_line1, y_line1.reshape(-1, 1))):
+        cv2.circle(image, tuple(pt.astype(int)), 6, (100, 149, 237), -1)  # cornflowerblue
+    for pt in np.hstack((X_line2, y_line2.reshape(-1, 1))):
+        cv2.circle(image, tuple(pt.astype(int)), 6, (50, 205, 50), -1)  # limegreen
+    for pt in np.hstack((X_noise, y_noise.reshape(-1, 1))):
+        cv2.drawMarker(image, tuple(pt.astype(int)), (0, 0, 255), markerType=cv2.MARKER_TILTED_CROSS, markerSize=10)
+
+    # Plot RANSAC Line
+    def draw_line_on_image(ransac_model, X_data, img, color):
+        if ransac_model:
+            line_X = np.linspace(X_data.min(), X_data.max(), 100).reshape(-1, 1)
+            line_y = ransac_model.predict(line_X)
+            points = np.vstack((line_X.flatten(), line_y)).T.astype(np.int32)
+            for i in range(len(points) - 1):
+                pt1 = tuple(points[i])
+                pt2 = tuple(points[i + 1])
+                cv2.line(img, pt1, pt2, color, thickness=2)
+
+    draw_line_on_image(ransac1, X, image, (255, 0, 0))  # Blau
+    draw_line_on_image(ransac2, X, image, (0, 255, 0))  # Grün
+
+    # Speichern
+    cv2.imshow("Output", cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+    line1 = zip(X_line1.flatten(),y_line1)
+    line2 = zip(X_line2.flatten(),y_line2)
+
+    return line1, line2
+
 
 def find_best_line(X_data, y_data):
+    # RANSAC helper function
     if len(X_data) < 2:
         return None, None, None
 
@@ -114,6 +178,7 @@ def find_best_line(X_data, y_data):
     outlier_mask = np.logical_not(inlier_mask)
 
     return ransac, inlier_mask, outlier_mask
+
 
 def find_pairs_hough_line_transform(coords, image):
     # THIS METHOD IS USED TO FIND WHITE EDGES AND USE THE MEDIAN LINE TO SEPERATE LEFT AND RIGHT
@@ -238,6 +303,7 @@ def find_pairs_hough_line_transform(coords, image):
 
 
 def filter_close_points(coords, delta=10):
+    # HELPER FUNCTION TO DELETE MULTIPLE DETECTIONS ON THE SAME OBJECT
     coords = np.array(coords)
     filtered = []
     used = np.zeros(len(coords), dtype=bool)
@@ -251,6 +317,7 @@ def filter_close_points(coords, delta=10):
         used[close_idxs] = True
         filtered.append(point)
     return np.array(filtered)
+
 
 def crossing_gate(data, gate, frame_counter, distance):
     half_distance = distance / 2
@@ -333,6 +400,7 @@ def parse_source_file(filename, width, height):
         return [[-1, -1], [-1, -1], [-1, -1], [-1, -1]]
     return points
 
+
 def export_vehicle_data(vehicle_data, filename):
     os.makedirs("csv_exports", exist_ok=True)
     filepath = os.path.join("csv_exports", filename)
@@ -382,6 +450,7 @@ if __name__ == "__main__":
     parser.add_argument("--plot", action="store_true", help="Enables plotting for debugging or visualization")
     parser.add_argument("--source_file", action="store_true",
                         help="Optional: Avoid detection, use custom source points in the text file")
+    parser.add_argument("-c", "--calibration", type=str, help="Either type \"ransac\" or \"houghline\" for calibration")
 
     args = parser.parse_args()
 
@@ -389,6 +458,7 @@ if __name__ == "__main__":
     DISTANCE = args.distance if args.distance else 50.0  # default 50 meters
     modelType = args.model if args.model else "yolo12l.pt"
     plot = True if args.plot else False
+    calibration = args.calibration if args.calibration else "ransac"
 
     video_info = sv.VideoInfo.from_video_path(videoPath)
     model = YOLO(modelType)
@@ -410,7 +480,7 @@ if __name__ == "__main__":
         else:
             source = custom_source
     if not custom_source_flag:
-        paired_delineators = get_coordinates(videoPath)
+        paired_delineators = get_coordinates(videoPath, calibration)
         for i in range(len(paired_delineators) - 1):
             bottom_pair = paired_delineators[i]
             top_pair = paired_delineators[i + 1]
@@ -427,7 +497,6 @@ if __name__ == "__main__":
                            sections[0]["bottom_1"],  # C
                            sections[0]["bottom_0"]]  # D
                           , dtype="int32")
-
 
     polygon_zone = sv.PolygonZone(source)
     view_transformer = ViewTransformer(source=source)
@@ -535,4 +604,3 @@ if __name__ == "__main__":
 
     base, _ = os.path.splitext(os.path.basename(videoPath))
     export_vehicle_data(vehicle_data, base + '.csv')
-
