@@ -87,9 +87,10 @@ def get_coordinates(video_path, calibration) -> list[tuple[Any, Any]]:
     # Suppose coords is your (N,2) array of points
     coords = np.array(coords, dtype=np.int32)
 
-    if (calibration == "ransac"):
-        above, below = find_pairs_hough_line_transform(coords, image)
-    elif (calibration == "houghline"):
+    if (calibration == "houghline"):
+        above, below = find_pairs_hough_line_transform(detections, coords, image)
+    else:
+        # use ransac if user typed anything
         above, below = find_pairs_ransac(coords, image)
 
     above = above[np.argsort(above[:, 1])[::-1]]
@@ -105,12 +106,15 @@ def find_pairs_ransac(coords, image):
     X = coords[:, 0].reshape(-1, 1)
     y = coords[:, 1]
 
+    lines12 = []
     # First RANSAC Line
     ransac1, inlier_mask1, outlier_mask1 = find_best_line(X, y)
 
     if ransac1:
         X_line1 = X[inlier_mask1]
         y_line1 = y[inlier_mask1]
+        lines12.append(np.hstack((X_line1, y_line1.reshape(-1, 1))))
+
         X_remaining = X[outlier_mask1]
         y_remaining = y[outlier_mask1]
 
@@ -122,6 +126,7 @@ def find_pairs_ransac(coords, image):
             y_line2 = y_remaining[inlier_mask2]
             X_noise = X_remaining[outlier_mask2]
             y_noise = y_remaining[outlier_mask2]
+            lines12.append(np.hstack((X_line2, y_line2.reshape(-1, 1))))
         else:
             X_line2, y_line2 = np.array([]), np.array([])
             X_noise, y_noise = X_remaining, y_remaining
@@ -129,12 +134,17 @@ def find_pairs_ransac(coords, image):
         print("No Lines detected")
         X_line1, y_line1, X_line2, y_line2, X_noise, y_noise = [np.array([])] * 6
 
+
+    line1 = np.hstack((X_line1, y_line1.reshape(-1, 1)))
+    line2 = np.hstack((X_line2, y_line2.reshape(-1, 1)))
+    noise = np.hstack((X_noise, y_noise.reshape(-1, 1)))
+
     # Plot points:
-    for pt in np.hstack((X_line1, y_line1.reshape(-1, 1))):
+    for pt in line1:
         cv2.circle(image, tuple(pt.astype(int)), 6, (100, 149, 237), -1)  # cornflowerblue
-    for pt in np.hstack((X_line2, y_line2.reshape(-1, 1))):
+    for pt in line2:
         cv2.circle(image, tuple(pt.astype(int)), 6, (50, 205, 50), -1)  # limegreen
-    for pt in np.hstack((X_noise, y_noise.reshape(-1, 1))):
+    for pt in noise:
         cv2.drawMarker(image, tuple(pt.astype(int)), (0, 0, 255), markerType=cv2.MARKER_TILTED_CROSS, markerSize=10)
 
     # Plot RANSAC Line
@@ -155,9 +165,6 @@ def find_pairs_ransac(coords, image):
     cv2.imshow("Output", cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
     cv2.waitKey(0)
     cv2.destroyAllWindows()
-
-    line1 = zip(X_line1.flatten(),y_line1)
-    line2 = zip(X_line2.flatten(),y_line2)
 
     return line1, line2
 
@@ -180,7 +187,7 @@ def find_best_line(X_data, y_data):
     return ransac, inlier_mask, outlier_mask
 
 
-def find_pairs_hough_line_transform(coords, image):
+def find_pairs_hough_line_transform(detections, coords, image):
     # THIS METHOD IS USED TO FIND WHITE EDGES AND USE THE MEDIAN LINE TO SEPERATE LEFT AND RIGHT
     coords = filter_close_points(coords, delta=50)
     print(coords)
