@@ -7,6 +7,7 @@ import supervision as sv
 import csv
 import argparse
 from typing import Any
+import glob
 
 TARGET_WIDTH = 75
 TARGET_HEIGHT = 150
@@ -56,7 +57,7 @@ class VehicleData:
 
 
 # Returns point array of detected posts using a yolo model
-def get_coordinates(video_path, calibration) -> list[tuple[Any, Any]]:
+def get_coordinates(video_path, calibration, plot) -> list[tuple[Any, Any]]:
     model = YOLO(f'best_YOLOv12_traffic-delinator.pt')
     frame_gen = sv.get_video_frames_generator(video_path)
 
@@ -88,10 +89,10 @@ def get_coordinates(video_path, calibration) -> list[tuple[Any, Any]]:
     coords = np.array(coords, dtype=np.int32)
 
     if (calibration == "houghline"):
-        above, below = find_pairs_hough_line_transform(detections, coords, image)
+        above, below = find_pairs_hough_line_transform(detections, coords, image, plot)
     else:
         # use ransac if user typed anything
-        above, below = find_pairs_ransac(coords, image)
+        above, below = find_pairs_ransac(coords, image, plot)
 
     above = above[np.argsort(above[:, 1])[::-1]]
     below = below[np.argsort(below[:, 1])[::-1]]
@@ -102,7 +103,8 @@ def get_coordinates(video_path, calibration) -> list[tuple[Any, Any]]:
     return paired_delineators
 
 
-def find_pairs_ransac(coords, image):
+def find_pairs_ransac(coords, image, plot):
+    # get X and Y in the correct format for ransac
     X = coords[:, 0].reshape(-1, 1)
     y = coords[:, 1]
 
@@ -134,37 +136,37 @@ def find_pairs_ransac(coords, image):
         print("No Lines detected")
         X_line1, y_line1, X_line2, y_line2, X_noise, y_noise = [np.array([])] * 6
 
-
+    # re-array all points in their category
     line1 = np.hstack((X_line1, y_line1.reshape(-1, 1)))
     line2 = np.hstack((X_line2, y_line2.reshape(-1, 1)))
     noise = np.hstack((X_noise, y_noise.reshape(-1, 1)))
+    if plot:
+        # Plot points:
+        for pt in line1:
+            cv2.circle(image, tuple(pt.astype(int)), 6, (100, 149, 237), -1)  # cornflowerblue
+        for pt in line2:
+            cv2.circle(image, tuple(pt.astype(int)), 6, (50, 205, 50), -1)  # limegreen
+        for pt in noise:
+            cv2.drawMarker(image, tuple(pt.astype(int)), (0, 0, 255), markerType=cv2.MARKER_TILTED_CROSS, markerSize=10)
 
-    # Plot points:
-    for pt in line1:
-        cv2.circle(image, tuple(pt.astype(int)), 6, (100, 149, 237), -1)  # cornflowerblue
-    for pt in line2:
-        cv2.circle(image, tuple(pt.astype(int)), 6, (50, 205, 50), -1)  # limegreen
-    for pt in noise:
-        cv2.drawMarker(image, tuple(pt.astype(int)), (0, 0, 255), markerType=cv2.MARKER_TILTED_CROSS, markerSize=10)
+        # Plot RANSAC Line
+        def draw_line_on_image(ransac_model, X_data, img, color):
+            if ransac_model:
+                line_X = np.linspace(X_data.min(), X_data.max(), 100).reshape(-1, 1)
+                line_y = ransac_model.predict(line_X)
+                points = np.vstack((line_X.flatten(), line_y)).T.astype(np.int32)
+                for i in range(len(points) - 1):
+                    pt1 = tuple(points[i])
+                    pt2 = tuple(points[i + 1])
+                    cv2.line(img, pt1, pt2, color, thickness=2)
 
-    # Plot RANSAC Line
-    def draw_line_on_image(ransac_model, X_data, img, color):
-        if ransac_model:
-            line_X = np.linspace(X_data.min(), X_data.max(), 100).reshape(-1, 1)
-            line_y = ransac_model.predict(line_X)
-            points = np.vstack((line_X.flatten(), line_y)).T.astype(np.int32)
-            for i in range(len(points) - 1):
-                pt1 = tuple(points[i])
-                pt2 = tuple(points[i + 1])
-                cv2.line(img, pt1, pt2, color, thickness=2)
+        draw_line_on_image(ransac1, X, image, (255, 0, 0))  # Blau
+        draw_line_on_image(ransac2, X, image, (0, 255, 0))  # Grün
 
-    draw_line_on_image(ransac1, X, image, (255, 0, 0))  # Blau
-    draw_line_on_image(ransac2, X, image, (0, 255, 0))  # Grün
-
-    # Speichern
-    cv2.imshow("Output", cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+        # Speichern
+        cv2.imshow("Output", cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
 
     return line1, line2
 
@@ -187,7 +189,7 @@ def find_best_line(X_data, y_data):
     return ransac, inlier_mask, outlier_mask
 
 
-def find_pairs_hough_line_transform(detections, coords, image):
+def find_pairs_hough_line_transform(detections, coords, image, plot):
     # THIS METHOD IS USED TO FIND WHITE EDGES AND USE THE MEDIAN LINE TO SEPERATE LEFT AND RIGHT
     coords = filter_close_points(coords, delta=50)
     print(coords)
@@ -234,18 +236,6 @@ def find_pairs_hough_line_transform(detections, coords, image):
             b = y1 - m * x1
             mxb.append([m, b])
 
-    # Now find pairs of parallel lines
-    # parallel_pairs = []
-    # threshold = 0.2  # adjust for what you consider "parallel"
-    # for i, line1 in enumerate(mxb):
-    #    for j, line2 in enumerate(mxb):
-    #        if i >= j:
-    #            continue  # avoid duplicate pairs
-    #        if abs(line1[0] - line2[0]) < threshold:
-    #            parallel_pairs.append(line1)
-    #            parallel_pairs.append(line2)
-    # parallel_pairs = np.array(parallel_pairs)
-
     # get median line
     mxb = np.array(mxb)
     if mxb.shape[0] == 0:
@@ -266,45 +256,45 @@ def find_pairs_hough_line_transform(detections, coords, image):
 
     above = np.array(above)
     below = np.array(below)
+    if plot:
+        for pt in coords:
+            x, y = int(pt[0]), int(pt[1])
+            y_on_line = median_m * x + median_b
+            if y < y_on_line:
+                label = "Above"
+                color = (0, 255, 0)  # Green
+            else:
+                label = "Below"
+                color = (0, 0, 255)  # Red
+            cv2.circle(image, (x, y), 5, color, -1)
+            cv2.putText(
+                image,
+                label,
+                (x + 5, y - 5),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                color,
+                1,
+                cv2.LINE_AA
+            )
 
-    for pt in coords:
-        x, y = int(pt[0]), int(pt[1])
-        y_on_line = median_m * x + median_b
-        if y < y_on_line:
-            label = "Above"
-            color = (0, 255, 0)  # Green
-        else:
-            label = "Below"
-            color = (0, 0, 255)  # Red
-        cv2.circle(image, (x, y), 5, color, -1)
-        cv2.putText(
-            image,
-            label,
-            (x + 5, y - 5),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
-            color,
-            1,
-            cv2.LINE_AA
-        )
+        # Draw Median line green
+        height, width = image.shape[:2]
+        x1, x2 = 0, width - 1
+        y1 = int(median_m * x1 + median_b)
+        y2 = int(median_m * x2 + median_b)
+        cv2.line(image, (x1, y1), (x2, y2), (0, 255, 0), 2)
 
-    # Draw Median line green
-    height, width = image.shape[:2]
-    x1, x2 = 0, width - 1
-    y1 = int(median_m * x1 + median_b)
-    y2 = int(median_m * x2 + median_b)
-    cv2.line(image, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        # Draw the lines on the original image
+        if lines is not None:
+            for line in lines:
+                x1, y1, x2, y2 = line[0]
+                cv2.line(image, (x1, y1), (x2, y2), (0, 0, 255), 2)
 
-    # Draw the lines on the original image
-    if lines is not None:
-        for line in lines:
-            x1, y1, x2, y2 = line[0]
-            cv2.line(image, (x1, y1), (x2, y2), (0, 0, 255), 2)
-
-    # Display the result
-    cv2.imshow('Lines Detected', image)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+        # Display the result
+        cv2.imshow('Lines Detected', image)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
 
     return above, below
 
@@ -487,7 +477,7 @@ if __name__ == "__main__":
         else:
             source = custom_source
     if not custom_source_flag:
-        paired_delineators = get_coordinates(videoPath, calibration)
+        paired_delineators = get_coordinates(videoPath, calibration, plot)
         for i in range(len(paired_delineators) - 1):
             bottom_pair = paired_delineators[i]
             top_pair = paired_delineators[i + 1]
@@ -592,20 +582,20 @@ if __name__ == "__main__":
         annotated_frame = label_annotator.annotate(scene=annotated_frame, detections=detections, labels=labels)
 
         frame_counter += 1
+        if plot:
+            ## Plotting:
+            # Standard view:
+            cv2.imshow("annotated_frame", annotated_frame)
+            if cv2.waitKey(1) == ord("q"):
+                break
 
-        ## Plotting:
-        # Standard view:
-        cv2.imshow("annotated_frame", annotated_frame)
-        if cv2.waitKey(1) == ord("q"):
-            break
-
-        # Top-down view:
-        scale_factor = 10
-        warped_size = (TARGET_WIDTH, TARGET_HEIGHT)
-        top_down_frame = cv2.warpPerspective(frame, view_transformer.m, warped_size)
-        top_down_scaled = cv2.resize(top_down_frame, (TARGET_WIDTH * scale_factor, TARGET_HEIGHT * scale_factor),
+            # Top-down view:
+            scale_factor = 10
+            warped_size = (TARGET_WIDTH, TARGET_HEIGHT)
+            top_down_frame = cv2.warpPerspective(frame, view_transformer.m, warped_size)
+            top_down_scaled = cv2.resize(top_down_frame, (TARGET_WIDTH * scale_factor, TARGET_HEIGHT * scale_factor),
                                      interpolation=cv2.INTER_CUBIC)
-        cv2.imshow("Top-down Warped Frame", top_down_scaled)
+            cv2.imshow("Top-down Warped Frame", top_down_scaled)
 
     cv2.destroyAllWindows()
 
