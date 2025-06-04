@@ -464,6 +464,7 @@ if __name__ == "__main__":
 
     videoPath = args.path if args.path else "example-videos/example.mp4"
     DISTANCE = args.distance if args.distance else 50.0  # default 50 meters
+    DISTANCE = int(DISTANCE) if DISTANCE.isdigit() else 50
     modelType = args.model if args.model else "yolo12l.pt"
     plot = True if args.plot else False
     calibration = args.calibration if args.calibration else "ransac"
