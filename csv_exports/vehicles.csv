@@ -1,0 +1,11 @@
+tracking_id,start_frame,middle_frame,end_frame,first_crossed,speed,start_to_mid_speed,mid_to_end_speed,acceleration,average_vertical_distances,valid
+1,0,,,bottom,,,,,{},False
+2,8,,,bottom,,,,,{},False
+5,17,32,47,bottom,150.0,150.0,150.0,,{5: 0.0},True
+3,17,,,bottom,,,,,{},False
+7,110,,,top,,,,,{},False
+8,177,193,208,top,145.16,140.62,150.0,15.63,{8: 0.0},True
+9,311,328,345,top,132.35,132.35,132.35,,{9: 0.0},True
+10,365,389,411,top,97.83,93.75,102.27,9.68,{10: 0.0},True
+12,437,459,479,top,107.14,102.27,112.5,12.78,{12: 0.0},True
+11,446,,,top,,,,,{},False
