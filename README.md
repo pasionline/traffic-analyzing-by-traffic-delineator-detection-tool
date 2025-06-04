@@ -32,31 +32,50 @@ This tool uses a fine-tuned YOLOv12x [YOLOv12_traffic-delineator](https://huggin
    ```bash
    pip install -r requirements.txt
 ## Usage
-For simply analyzing an existing video with a delineator-gap distance of 50 meters, use this command:
-```bash
-python analyze_video.py -p path/to/the/video.mp4
-```
+* For simply analyzing an existing video with a delineator-gap distance of 50 meters, use this command:
+   ```bash
+   python analyze_video.py -p path/to/the/video.mp4
+   ```
 
-Run an analysis with a custom distance:
+* Run an analysis with a custom distance:
 
-```bash
-python analyze_video.py -p path/to/the/video.mp4 -d 100
-```
+   ```bash
+   python analyze_video.py -p path/to/the/video.mp4 -d 100
+   ```
+
+* Run an analysis with a different Calibration method (default is RANSAC):
+
+   ```bash
+   python analyze_video.py -p path/to/the/video.mp4 -c houghline
+   ```
 
 ### Optional:
 
-Switch the YOLO model which detects vehicles (default model is yolo12l.pt:
+* Switch the YOLO model which detects vehicles (default model is yolo12l.pt:
 
-```bash
-python analyze_video.py -p path/to/the/video.mp4 -m yolo12n.pt
-```
+   ```bash
+   python analyze_video.py -p path/to/the/video.mp4 -m yolo12n.pt
+   ```
 
-Enable plotting/visualization: 
+* Enable plotting/visualization: 
 
-```bash
-python analyze_video.py -p path/to/the/video.mp4 --plot
-```
+   ```bash
+   python analyze_video.py -p path/to/the/video.mp4 --plot
+   ```
 
-## License
+* Change region of interest to a different zone of 4 delineators (default is 0, bottom -> top):
 
-   
+   ```bash
+  python analyze_video.py -p path/to/the/video.mp4 -s 1
+   ```
+
+* Use manual labeling of delineators (use custom_source_points.yaml):
+
+   ```bash
+  python analyze_video.py -p path/to/the/video.mp4 --source_file
+   ```
+
+* Download a YouTube video (follow the instructions displayed):
+   ```bash
+   python downloadVideo.py
+   ```
