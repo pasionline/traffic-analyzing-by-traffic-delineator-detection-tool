@@ -62,7 +62,7 @@ def get_coordinates(video_path, calibration, plot) -> list[tuple[Any, Any]]:
     frame_gen = sv.get_video_frames_generator(video_path)
 
     def callback(image_slice: np.ndarray) -> sv.Detections:
-        result = model(image_slice)[0]
+        result = model(image_slice, conf=0.2)[0]
         return sv.Detections.from_ultralytics(result)
 
     image = next(frame_gen)
@@ -85,8 +85,19 @@ def get_coordinates(video_path, calibration, plot) -> list[tuple[Any, Any]]:
 
     coords = detections.get_anchors_coordinates(anchor=sv.Position.BOTTOM_CENTER)
 
+    if plot:
+        # Annotate detections
+        annotator = sv.BoxAnnotator()
+        annotated_image = annotator.annotate(scene=image.copy(), detections=detections)
+
+        # Display the image (optional, e.g., in Jupyter or local test)
+        cv2.imshow("Detections", annotated_image)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+
     # Suppose coords is your (N,2) array of points
     coords = np.array(coords, dtype=np.int32)
+    coords = filter_close_points(coords, delta=50)
 
     if (calibration == "houghline"):
         above, below = find_pairs_hough_line_transform(detections, coords, image, plot)
@@ -191,7 +202,6 @@ def find_best_line(X_data, y_data):
 
 def find_pairs_hough_line_transform(detections, coords, image, plot):
     # THIS METHOD IS USED TO FIND WHITE EDGES AND USE THE MEDIAN LINE TO SEPERATE LEFT AND RIGHT
-    coords = filter_close_points(coords, delta=50)
     print(coords)
     if len(detections.xyxy) < 4:
         raise Exception('Not enough detections to form a region of interest')
@@ -448,6 +458,7 @@ if __name__ == "__main__":
     parser.add_argument("--source_file", action="store_true",
                         help="Optional: Avoid detection, use custom source points in the text file")
     parser.add_argument("-c", "--calibration", type=str, help="Either type \"ransac\" or \"houghline\" for calibration")
+    parser.add_argument("-s", "--section", type=str, help="Integer in which section to do analysis [0,1,2,3..]")
 
     args = parser.parse_args()
 
@@ -456,6 +467,8 @@ if __name__ == "__main__":
     modelType = args.model if args.model else "yolo12l.pt"
     plot = True if args.plot else False
     calibration = args.calibration if args.calibration else "ransac"
+    s = args.section if args.section else "0"
+    s = int(s) if s.isdigit() else 0
 
     video_info = sv.VideoInfo.from_video_path(videoPath)
     model = YOLO(modelType)
@@ -489,10 +502,10 @@ if __name__ == "__main__":
             }
 
             sections.append(section)
-        source = np.array([sections[0]["top_0"],  # A
-                           sections[0]["top_1"],  # B
-                           sections[0]["bottom_1"],  # C
-                           sections[0]["bottom_0"]]  # D
+        source = np.array([sections[s]["top_0"],  # A
+                           sections[s]["top_1"],  # B
+                           sections[s]["bottom_1"],  # C
+                           sections[s]["bottom_0"]]  # D
                           , dtype="int32")
 
     polygon_zone = sv.PolygonZone(source)
