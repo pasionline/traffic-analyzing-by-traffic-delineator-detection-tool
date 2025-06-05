@@ -62,7 +62,7 @@ def get_coordinates(video_path, calibration, plot) -> list[tuple[Any, Any]]:
     frame_gen = sv.get_video_frames_generator(video_path)
 
     def callback(image_slice: np.ndarray) -> sv.Detections:
-        result = model(image_slice, conf=0.2)[0]
+        result = model(image_slice)[0]
         return sv.Detections.from_ultralytics(result)
 
     image = next(frame_gen)
@@ -463,8 +463,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     videoPath = args.path if args.path else "example-videos/example.mp4"
-    DISTANCE = args.distance if args.distance else 50.0  # default 50 meters
-    DISTANCE = int(DISTANCE) if DISTANCE.isdigit() else 50
+    DISTANCE = args.distance if args.distance else "50.0"  # default 50 meters
+    DISTANCE = float(DISTANCE) if DISTANCE.isdigit() else 50.0
     modelType = args.model if args.model else "yolo12l.pt"
     plot = True if args.plot else False
     calibration = args.calibration if args.calibration else "ransac"
