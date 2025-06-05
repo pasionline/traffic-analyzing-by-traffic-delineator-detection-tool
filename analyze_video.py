@@ -10,7 +10,7 @@ from typing import Any
 import glob
 
 TARGET_WIDTH = 75
-TARGET_HEIGHT = 150
+TARGET_HEIGHT = 50
 # Percentage Range in which the cars are tracked
 TARGET_DELTA = 0.05 * TARGET_HEIGHT
 
@@ -71,7 +71,7 @@ def get_coordinates(video_path, calibration, plot) -> list[tuple[Any, Any]]:
 
     # Rotating the first couple of frames in case a Vehicle blocks the vision on a delineator
     i = 0
-    while i < 5:
+    while i < 1:
         image = next(frame_gen)
 
         nextDetections = slicer(image)
@@ -571,7 +571,7 @@ if __name__ == "__main__":
                 if other_data is None or data is None:
                     continue
                 # skip same vehicle
-                if other_id == tracker_id and other_data.first_crossed != data.first_crossed:
+                if other_id == tracker_id or other_data.first_crossed != data.first_crossed:
                     continue
 
                 scale_factor = DISTANCE / TARGET_HEIGHT  # meters per pixel
