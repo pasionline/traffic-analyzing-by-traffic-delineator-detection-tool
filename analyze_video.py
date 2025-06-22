@@ -7,7 +7,6 @@ import supervision as sv
 import csv
 import argparse
 from typing import Any
-import glob
 
 TARGET_WIDTH = 75
 TARGET_HEIGHT = 50
@@ -462,7 +461,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    videoPath = args.path if args.path else "example-videos/example.mp4"
+    videoPath = args.path if args.path else "example-videos/pixabay.mp4"
     DISTANCE = args.distance if args.distance else "50.0"  # default 50 meters
     DISTANCE = float(DISTANCE) if DISTANCE.isdigit() else 50.0
     modelType = args.model if args.model else "yolo12l.pt"
