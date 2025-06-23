@@ -89,16 +89,15 @@ def get_coordinates(video_path, calibration, plot) -> list[tuple[Any, Any]]:
         annotator = sv.BoxAnnotator()
         annotated_image = annotator.annotate(scene=image.copy(), detections=detections)
 
-        # Display the image (optional, e.g., in Jupyter or local test)
+        # Display the image
         cv2.imshow("Detections", annotated_image)
         cv2.waitKey(0)
         cv2.destroyAllWindows()
 
-    # Suppose coords is your (N,2) array of points
     coords = np.array(coords, dtype=np.int32)
     coords = filter_close_points(coords, delta=50)
 
-    if (calibration == "houghline"):
+    if calibration == "houghline" or coords.size < 6:
         above, below = find_pairs_hough_line_transform(detections, coords, image, plot)
     else:
         # use ransac if user typed anything
@@ -173,7 +172,7 @@ def find_pairs_ransac(coords, image, plot):
         draw_line_on_image(ransac1, X, image, (255, 0, 0))  # Blau
         draw_line_on_image(ransac2, X, image, (0, 255, 0))  # Grün
 
-        # Speichern
+        # Save
         cv2.imshow("Output", cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
         cv2.waitKey(0)
         cv2.destroyAllWindows()
@@ -187,9 +186,9 @@ def find_best_line(X_data, y_data):
         return None, None, None
 
     ransac = RANSACRegressor(
-        min_samples=2,  # Mindestpunkte für eine Linie
-        residual_threshold=15.0,  # Max. Abstand zur Linie (Pixel), um Inlier zu sein
-        max_trials=1000  # Anzahl der Versuche
+        min_samples=2, # minimum required points to form a line
+        residual_threshold=15.0, # maximum delta in which a point is considered to be part of the line
+        max_trials=1000
     )
     ransac.fit(X_data, y_data)
 
